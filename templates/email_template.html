@@ -61,29 +61,3 @@
 </article>
 
 <hr>
-
-<!-- 新用户创建通知模板 -->
-<article>
-    <hgroup>
-        <h2>新用户创建通知模板</h2>
-        <p>在此处编辑新用户欢迎邮件的 **核心正文内容**。系统将自动套用HTML模板。</p>
-    </hgroup>
-    <p>您可以使用以下变量：<br>
-        {% raw %}
-        <code>{{username}}</code> - 新用户的用户名。<br>
-        <code>{{password}}</code> - 为用户生成的随机初始密码。<br>
-        <code>{{panel_url}}</code> - 面板的登录地址。<br>
-        {% endraw %}
-    </p>
-    <form method="post">
-        <input type="hidden" name="form_type" value="create_user">
-        
-        <label for="create_user_subject">邮件主题</label>
-        <input type="text" id="create_user_subject" name="subject" value="{{ create_user_template_data.subject }}" required>
-
-        <label for="create_user_body">邮件正文 (支持换行)</label>
-        <textarea id="create_user_body" name="body" rows="10" required>{{ create_user_template_data.body }}</textarea>
-
-        <button type="submit">保存新用户模板</button>
-    </form>
-</article>

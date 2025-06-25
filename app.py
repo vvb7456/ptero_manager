@@ -338,10 +338,10 @@ def create_ptero_user(email, username):
     panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
     api_url = f"{panel_url}/api/application/users"
     headers = get_api_headers()
-    password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
 
     try:
-        # 步骤 1: 创建用户，但不包含密码，以阻止 Pterodactyl 发送邮件
+        # 只需一步：创建用户，不包含任何密码信息。
+        # Pterodactyl 将会自动处理后续的密码设置邮件。
         create_payload = {
             "email": email, 
             "username": username, 
@@ -349,39 +349,12 @@ def create_ptero_user(email, username):
             "last_name": "User",
             "root_admin": False
         }
-        res_create = requests.post(api_url, headers=headers, json=create_payload, timeout=20)
-        res_create.raise_for_status()
-        new_user_data = res_create.json()
-        user_id = new_user_data['attributes']['id']
-
-        # 步骤 2: 立即更新用户，为其设置密码
-        # **BUG 修复**: 在 update_payload 中补全 API 要求的必填字段
-        update_url = f"{api_url}/{user_id}"
-        update_payload = {
-            "email": email,
-            "username": username,
-            "first_name": "New",
-            "last_name": "User",
-            "password": password
-        }
-        res_update = requests.patch(update_url, headers=headers, json=update_payload, timeout=20)
-        res_update.raise_for_status()
-
-        # 步骤 3: 发送我们自己的、完全可控的欢迎邮件
-        template = load_create_user_template()
-        body_raw = template.get('body', '')
-        final_body = body_raw.replace('{{username}}', username).replace('{{password}}', password)
-
-        send_email(
-            recipient_email=email,
-            subject=template.get('subject'),
-            main_content_raw=final_body,
-            greeting=f"您好, {username}!",
-            action_text="点此登录您的账户",
-            action_url=panel_url
-        )
+        res = requests.post(api_url, headers=headers, json=create_payload, timeout=20)
+        res.raise_for_status()
+        new_user_data = res.json()
         
-        flash(f"用户 '{username}' 创建成功！初始密码已通过邮件发送至 {email}。", "success")
+        # 更新 flash 消息，告知管理员 Pterodactyl 将会发送邮件。
+        flash(f"用户 '{username}' 创建成功！Pterodactyl 将直接向用户邮箱发送一封设置密码的邮件。", "success")
         return new_user_data['attributes']
 
     except requests.RequestException as e:
