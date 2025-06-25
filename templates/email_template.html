@@ -1,0 +1,61 @@
+<!-- templates/email_template.html (升级为模板管理页面) -->
+
+<!-- 批量邮件模板 -->
+<article>
+    <hgroup>
+        <h2>批量邮件模板</h2>
+        <p>在这里编辑的内容将作为在 **服务器列表** 或 **用户列表** 页面进行 **批量发送邮件** 操作时的模板。</p>
+    </hgroup>
+    <p>您可以使用以下变量：<br>
+        {% raw %}
+        <code>{{panel_name}}</code> - 面板名称。<br>
+        <code>{{username}}</code> - 用户的用户名。<br>
+        <code>{{email}}</code> - 用户的邮箱地址。<br>
+        <code>{{server_name}}</code> - 服务器的名称 (若从用户列表发送，则为 '不适用')。<br>
+        <code>{{server_id}}</code> - 服务器的 ID (若从用户列表发送，则为 '不适用')。<br>
+        <code>{{expiration_date}}</code> - 服务器的到期时间 (若从用户列表发送，则为 '不适用')。<br>
+        {% endraw %}
+    </p>
+    <form method="post">
+        <input type="hidden" name="form_type" value="bulk">
+        <label for="panel_name">面板名称 (用于邮件)</label>
+        <input type="text" id="panel_name" name="panel_name" value="{{ template_data.panel_name or '我的面板' }}">
+
+        <label for="subject">邮件主题</label>
+        <input type="text" id="subject" name="subject" value="{{ template_data.subject }}" required>
+
+        <label for="body">邮件正文</label>
+        <textarea id="body" name="body" rows="10" required>{{ template_data.body }}</textarea>
+
+        <button type="submit">保存批量模板</button>
+    </form>
+</article>
+
+<hr>
+
+<!-- 自动到期提醒模板 -->
+<article>
+    <hgroup>
+        <h2>自动到期提醒模板</h2>
+        <p>在这里编辑的内容将作为 **自动化任务** 为即将到期的用户发送提醒邮件时的模板。</p>
+    </hgroup>
+    <p>您可以使用以下变量：<br>
+        {% raw %}
+        <code>{{panel_name}}</code> - 面板名称。<br>
+        <code>{{username}}</code> - 用户的用户名。<br>
+        <code>{{expiration_date}}</code> - 服务器共同的到期日期 (格式: YYYY-MM-DD)。<br>
+        <code>{{server_count}}</code> - 该用户即将到期的服务器总数。<br>
+        <code>{{server_list}}</code> - 自动生成的、包含所有即将到期服务器名称和ID的列表。<br>
+        {% endraw %}
+    </p>
+    <form method="post">
+        <input type="hidden" name="form_type" value="reminder">
+        <label for="reminder_subject">提醒邮件主题</label>
+        <input type="text" id="reminder_subject" name="subject" value="{{ reminder_template_data.subject }}" required>
+
+        <label for="reminder_body">提醒邮件正文</label>
+        <textarea id="reminder_body" name="body" rows="10" required>{{ reminder_template_data.body }}</textarea>
+
+        <button type="submit">保存提醒模板</button>
+    </form>
+</article>

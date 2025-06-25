@@ -1,0 +1,65 @@
+<!-- templates/users.html (v16: 无限滚动改造) -->
+<div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 2rem; margin-bottom: 1rem;">
+    <form id="batch-users-form" action="{{ url_for('batch_process_users') }}" method="post" style="margin: 0;">
+        {% for key, value in request.args.to_dict().items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+        <div style="display: flex; align-items: flex-end; gap: 1rem;">
+            <div>
+                <label for="batch-action-users" style="white-space: nowrap;"><strong>批量操作</strong></label>
+                <select name="action" id="batch-action-users" required>
+                    <option value="" disabled selected>选择...</option>
+                    <option value="email">发送通知邮件</option>
+                    <option value="delete">删除用户</option>
+                </select>
+            </div>
+            <div><button type="submit">执行</button></div>
+        </div>
+    </form>
+    <form id="filter-users-form" action="{{ url_for('users_list') }}" method="get" style="display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin: 0;">
+        <div>
+            <label for="search_term_user" style="margin-bottom: 0.25rem; font-size: 0.875rem;">搜索</label>
+            <input type="search" name="search_term" id="search_term_user" placeholder="用户名, 邮箱..." value="{{ request.args.get('search_term', '') }}" onchange="this.form.submit()" style="min-width: 180px;">
+        </div>
+        <div>
+            <label for="filter_server_status" style="margin-bottom: 0.25rem; font-size: 0.875rem;">服务器</label>
+            <select name="filter_server_status" id="filter_server_status" onchange="this.form.submit()">
+                <option value="all" {% if request.args.get('filter_server_status', 'all') == 'all' %}selected{% endif %}>全部</option>
+                <option value="has_servers" {% if request.args.get('filter_server_status') == 'has_servers' %}selected{% endif %}>有服务器</option>
+                <option value="no_servers" {% if request.args.get('filter_server_status') == 'no_servers' %}selected{% endif %}>无服务器</option>
+            </select>
+        </div>
+        <div>
+            <label for="sort_by_user" style="margin-bottom: 0.25rem; font-size: 0.875rem;">排序</label>
+            <select name="sort_by" id="sort_by_user" onchange="this.form.submit()">
+                <option value="username" {% if request.args.get('sort_by', 'username') == 'username' %}selected{% endif %}>用户名</option>
+                <option value="id" {% if request.args.get('sort_by') == 'id' %}selected{% endif %}>用户 ID</option>
+                <option value="server_count" {% if request.args.get('sort_by') == 'server_count' %}selected{% endif %}>服务器数量</option>
+            </select>
+        </div>
+        <div>
+            <label for="sort_order_user" style="margin-bottom: 0.25rem; font-size: 0.875rem;">顺序</label>
+            <select name="sort_order" id="sort_order_user" onchange="this.form.submit()">
+                <option value="asc" {% if request.args.get('sort_order', 'asc') == 'asc' %}selected{% endif %}>升序</option>
+                <option value="desc" {% if request.args.get('sort_order') == 'desc' %}selected{% endif %}>降序</option>
+            </select>
+        </div>
+    </form>
+</div>
+
+{% if users %}
+<div class="table-scroll-container">
+    <table role="grid">
+        <thead>
+            <tr>
+                <th style="width: 40px;"><input type="checkbox" id="select-all-users"></th>
+                <th>用户 ID</th><th>用户名</th><th>邮箱</th><th>服务器数量</th><th>状态</th><th>操作</th>
+            </tr>
+        </thead>
+        <tbody id="users-tbody">
+            {% include '_user_rows.html' %}
+        </tbody>
+    </table>
+    <div id="loading-indicator" style="display: none; text-align: center; padding: 1rem;">正在加载更多...</div>
+</div>
+{% else %}
+<p>未能获取到任何用户数据，或没有符合筛选条件的用户。</p>
+{% endif %}

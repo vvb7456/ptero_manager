@@ -1,0 +1,25 @@
+# 敏感的配置文件，绝不能上传
+# 这个文件应该在服务器上手动创建和管理
+settings.json
+email_template.json
+reminder_template.json
+.env
+
+# Python 虚拟环境目录
+venv/
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+
+# 运行时产生的日志和进程ID文件
+logs/
+ptero_manager.pid
+
+# 操作系统或编辑器生成的临时文件
+.DS_Store
+Thumbs.db
+*.swp
+
+# 应用实例和数据库文件
+instance/

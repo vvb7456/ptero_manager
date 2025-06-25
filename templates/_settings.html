@@ -1,0 +1,141 @@
+<!-- templates/_settings.html (移除独立SMTP用户，更新描述) -->
+<form method="post">
+    <!-- UI 设置 -->
+    <hgroup>
+        <h3>外观设置</h3>
+        <p>自定义此管理面板的品牌信息。</p>
+    </hgroup>
+    <label for="ui_system_name">
+        系统名称
+        <input type="text" id="ui_system_name" name="UI_SYSTEM_NAME" placeholder="例如: 艾萝工坊管理后台" value="{{ settings.UI_SYSTEM_NAME or '' }}">
+        <small>将显示在所有页面的左上角作为主标题。</small>
+    </label>
+    <label for="ui_banner_url">
+        Banner 图片 URL
+        <input type="url" id="ui_banner_url" name="UI_BANNER_URL" placeholder="例如: https://example.com/logo.png" value="{{ settings.UI_BANNER_URL or '' }}">
+        <small>输入一个公开可访问的图片链接。推荐使用透明背景的 PNG 图片，高度建议为 50-60 像素。</small>
+    </label>
+
+    <hr>
+    
+    <!-- 安全设置 -->
+    <hgroup>
+        <h3>安全设置</h3>
+        <p>管理此面板的访问凭证。</p>
+    </hgroup>
+    <label for="admin_password">
+        管理员密码
+        <input type="password" id="admin_password" name="ADMIN_PASSWORD" placeholder="留空则不修改密码" value="">
+        <small>当前值: {{ settings.ADMIN_PASSWORD }}</small>
+        <small>用于登录此管理面板的唯一密码。</small>
+    </label>
+    
+    <hr>
+
+    <!-- Pterodactyl API 设置 -->
+    <hgroup>
+        <h3>Pterodactyl API 设置</h3>
+        <p>连接到 Pterodactyl 面板所需的凭证。</p>
+    </hgroup>
+    <label for="ptero_panel_url">
+        面板 URL
+        <input type="url" id="ptero_panel_url" name="PTERO_PANEL_URL" placeholder="例如: https://panel.example.com" value="{{ settings.PTERO_PANEL_URL }}" required>
+    </label>
+    <label for="ptero_api_key">
+        Application API Key
+        <input type="password" id="ptero_api_key" name="PTERO_API_KEY" placeholder="留空则不修改" value="">
+        <small>当前值: {{ settings.PTERO_API_KEY }}</small>
+        <small style="color: var(--pico-primary-focus);"><strong>重要：</strong>如果将此 URL 或 Key 更换为指向一个全新的 Pterodactyl 面板，系统会自动清除与旧面板关联的所有本地到期时间数据，以匹配新面板。</small>
+    </label>
+    
+    <hr>
+
+    <!-- SMTP 设置 -->
+    <hgroup>
+        <h3>SMTP 邮件服务器设置</h3>
+        <p>用于发送邮件通知的邮箱配置。</p>
+    </hgroup>
+    <div class="grid">
+        <label for="smtp_host">
+            SMTP 主机
+            <input type="text" id="smtp_host" name="SMTP_HOST" value="{{ settings.SMTP_HOST }}">
+        </label>
+        <label for="smtp_port">
+            SMTP 端口
+            <input type="number" id="smtp_port" name="SMTP_PORT" value="{{ settings.SMTP_PORT }}">
+        </label>
+    </div>
+    <label for="smtp_password">
+        SMTP 密码 / 授权码
+        <input type="password" id="smtp_password" name="SMTP_PASSWORD" placeholder="留空则不修改" value="">
+        <small>当前值: {{ settings.SMTP_PASSWORD }}</small>
+        <small style="color: var(--pico-primary-focus);"><strong>重要：</strong>此密码必须对下方地址池中的所有邮箱账户都有效。</small>
+    </label>
+    <label for="sender_email">
+        发件人邮箱地址池
+        <textarea id="sender_email" name="SENDER_EMAIL" rows="3">{{ settings.SENDER_EMAIL }}</textarea>
+        <small>用于规避速率限制的“发件人”地址轮询池。输入一个或多个邮箱地址，用逗号 (,) 分隔。系统将使用池中的地址进行SMTP登录认证。</small>
+    </label>
+    <div class="grid">
+        <label for="email_send_delay">
+            邮件发送延迟 (秒)
+            <input type="number" id="email_send_delay" name="EMAIL_SEND_DELAY" value="{{ settings.EMAIL_SEND_DELAY }}">
+        </label>
+        <label for="smtp_use_ssl">
+            <input type="checkbox" id="smtp_use_ssl" name="SMTP_USE_SSL" role="switch" {% if settings.SMTP_USE_SSL %}checked{% endif %}>
+            使用 SSL
+        </label>
+    </div>
+
+    <hr>
+    
+    <!-- 服务器默认配置 -->
+    <hgroup>
+        <h3>服务器默认配置</h3>
+        <p>在创建服务器页面预先填写的默认值。</p>
+    </hgroup>
+    <div class="grid">
+        <label for="default_nest_id">
+            默认预设组 (Nest)
+            <select id="default_nest_id" name="DEFAULT_NEST_ID">
+                {% for nest in all_nests %}
+                <option value="{{ nest.id }}" {% if nest.id|string == settings.DEFAULT_NEST_ID|string %}selected{% endif %}>{{ nest.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label for="default_egg_id">
+            默认预设 (Egg)
+            <select id="default_egg_id" name="DEFAULT_EGG_ID">
+                {% for egg in all_eggs %}
+                <option value="{{ egg.id }}" {% if egg.id|string == settings.DEFAULT_EGG_ID|string %}selected{% endif %}>{{ egg.name }}</option>
+                {% else %}
+                <option value="" disabled>请先选择一个预设组</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label for="default_node_id">
+            默认节点
+            <select id="default_node_id" name="DEFAULT_NODE_ID">
+                {% for node in all_nodes %}
+                <option value="{{ node.id }}" {% if node.id|string == settings.DEFAULT_NODE_ID|string %}selected{% endif %}>{{ node.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+    <label for="docker_image">
+        默认 Docker 镜像
+        <input type="text" id="docker_image" name="DOCKER_IMAGE" value="{{ settings.DOCKER_IMAGE }}">
+    </label>
+    <div class="grid">
+        <label for="default_cpu">CPU (%)<input type="number" id="default_cpu" name="DEFAULT_CPU" value="{{ settings.DEFAULT_CPU }}"></label>
+        <label for="default_memory">内存 (MB)<input type="number" id="default_memory" name="DEFAULT_MEMORY" value="{{ settings.DEFAULT_MEMORY }}"></label>
+        <label for="default_disk">磁盘 (MB)<input type="number" id="default_disk" name="DEFAULT_DISK" value="{{ settings.DEFAULT_DISK }}"></label>
+    </div>
+    <div class="grid">
+        <label for="default_databases">数据库<input type="number" id="default_databases" name="DEFAULT_DATABASES" value="{{ settings.DEFAULT_DATABASES }}"></label>
+        <label for="default_backups">备份<input type="number" id="default_backups" name="DEFAULT_BACKUPS" value="{{ settings.DEFAULT_BACKUPS }}"></label>
+        <label for="default_allocations">额外端口<input type="number" id="default_allocations" name="DEFAULT_ALLOCATIONS" value="{{ settings.DEFAULT_ALLOCATIONS }}"></label>
+    </div>
+
+    <button type="submit">保存设置</button>
+</form>

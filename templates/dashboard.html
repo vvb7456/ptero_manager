@@ -1,0 +1,335 @@
+<!-- templates/dashboard.html (v17: 修复创建服务器JS逻辑) -->
+{% extends "layout.html" %}
+
+{% block page_content %}
+<section>
+    <div class="content-section">
+        <!-- 根据路由端点包含不同内容 -->
+        {% if request.endpoint == 'dashboard' %}
+            {% include '_dashboard.html' %}
+        {% elif request.endpoint == 'servers_list' %}
+            {% include '_server_list.html' %}
+        {% elif request.endpoint == 'users_list' %}
+            {% include 'users.html' %}
+        {% elif request.endpoint == 'create_server_page' %}
+            {% include '_create_server.html' %}
+        {% elif request.endpoint == 'email_template' %}
+            {% include 'email_template.html' %}
+        {% elif request.endpoint == 'automation_page' %}
+            {% include '_automation.html' %}
+        {% elif request.endpoint == 'settings_page' %}
+            {% include '_settings.html' %}
+        {% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // ---- v16: 无限滚动JS逻辑 ----
+    const scrollContainer = document.querySelector('.table-scroll-container');
+    
+    if (scrollContainer) {
+        const tableBody = scrollContainer.querySelector('tbody');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        // 确定API端点是用于服务器还是用户
+        const endpoint = tableBody.id === 'servers-tbody' ? '/api/load_servers' : '/api/load_users';
+
+        let currentPage = 1;
+        let isLoading = false;
+        let hasMorePages = true;
+
+        const loadMoreData = () => {
+            if (isLoading || !hasMorePages) return;
+
+            isLoading = true;
+            currentPage++;
+            if (loadingIndicator) loadingIndicator.style.display = 'block';
+
+            // 保持当前所有筛选/排序参数
+            const queryParams = new URLSearchParams(window.location.search);
+            queryParams.set('page', currentPage);
+
+            fetch(`${endpoint}?${queryParams.toString()}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.html) {
+                        tableBody.insertAdjacentHTML('beforeend', data.html);
+                    }
+                    hasMorePages = data.has_more;
+                    if (!hasMorePages && loadingIndicator) {
+                        loadingIndicator.innerHTML = '已加载全部内容';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading more data:', error);
+                    if (loadingIndicator) loadingIndicator.innerHTML = '加载失败';
+                })
+                .finally(() => {
+                    isLoading = false;
+                    if (loadingIndicator && hasMorePages) {
+                       loadingIndicator.style.display = 'none';
+                    }
+                });
+        };
+
+        scrollContainer.addEventListener('scroll', () => {
+            // 当滚动条距离底部小于 200px 时触发加载
+            const threshold = 200;
+            const isAtBottom = scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - threshold;
+            if (isAtBottom) {
+                loadMoreData();
+            }
+        });
+    }
+
+    // ---- 服务器列表批量操作 JS ----
+    const batchActionSelect = document.getElementById('batch-action');
+    const renewOptionsDiv = document.getElementById('renew-options');
+    if (batchActionSelect) {
+        batchActionSelect.addEventListener('change', function() {
+            if (this.value === 'renew') {
+                renewOptionsDiv.style.display = 'block';
+                renewOptionsDiv.querySelector('input').setAttribute('required', 'required');
+            } else {
+                renewOptionsDiv.style.display = 'none';
+                renewOptionsDiv.querySelector('input').removeAttribute('required');
+            }
+        });
+    }
+
+    const selectAllCheckbox = document.getElementById('select-all');
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            document.querySelectorAll('input[name="server_ids"]').forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+    }
+    
+    const batchForm = document.getElementById('batch-form');
+    if (batchForm) {
+        batchForm.addEventListener('submit', function(e) {
+            const action = document.getElementById('batch-action').value;
+            if (action === 'delete') {
+                if (!confirm('警告！您确定要批量删除选中的所有服务器吗？此操作不可逆！')) {
+                    e.preventDefault();
+                }
+            } else if (action === 'suspend' || action === 'unsuspend') {
+                 if (!confirm(`您确定要批量${action === 'suspend' ? '冻结' : '解冻'}选中的所有服务器吗？`)) {
+                    e.preventDefault();
+                }
+            }
+        });
+    }
+
+    // ---- 用户列表批量操作 JS ----
+    const selectAllUsersCheckbox = document.getElementById('select-all-users');
+    if (selectAllUsersCheckbox) {
+        selectAllUsersCheckbox.addEventListener('change', function() {
+            document.querySelectorAll('input[name="user_ids"]').forEach(checkbox => {
+                checkbox.checked = this.checked;
+            });
+        });
+    }
+
+    const batchUsersForm = document.getElementById('batch-users-form');
+    if (batchUsersForm) {
+        batchUsersForm.addEventListener('submit', function(e) {
+            const action = document.getElementById('batch-action-users').value;
+            if (action === 'delete') {
+                if (!confirm('警告！您确定要批量删除选中的所有用户及其名下所有服务器吗？此操作不可逆！')) {
+                    e.preventDefault();
+                }
+            } else if (action === 'email') {
+                if (!confirm('您确定要给所有选中的用户发送通知邮件吗？')) {
+                    e.preventDefault();
+                }
+            }
+        });
+    }
+
+    // ---- v17: 创建服务器页面 JS (修复启动指令逻辑) ----
+    const createServerForm = document.getElementById('create-server-form');
+    if (createServerForm) {
+        $('#user_id').select2({
+            placeholder: '输入用户名或邮箱搜索...',
+            theme: 'bootstrap-5'
+        });
+
+        const userSelect = $('#user_id');
+        const serverNameInput = document.getElementById('server_name');
+        userSelect.on('select2:select', function(e) {
+            const data = e.params.data;
+            const username = data.text.split(' (')[0];
+            if (!serverNameInput.value) {
+                serverNameInput.value = `ST-${username}`;
+            }
+        });
+
+        const nestSelect = document.getElementById('nest_id');
+        const eggSelect = document.getElementById('egg_id');
+        const eggLoadingMsg = document.getElementById('egg-loading-msg');
+        const defaultEggId = createServerForm.dataset.defaultEggId;
+        const variablesContainer = document.getElementById('egg-variables-container');
+        const varsLoadingMsg = document.getElementById('vars-loading-msg');
+        const startupInput = document.getElementById('startup_command');
+        
+        function fetchEggVariables(nestId, eggId) {
+            if (!nestId || !eggId) return;
+            variablesContainer.innerHTML = '';
+            varsLoadingMsg.style.display = 'inline';
+            
+            fetch(`/api/nests/${nestId}/eggs/${eggId}/variables`)
+                .then(response => {
+                    if (!response.ok) { throw new Error(`HTTP error! status: ${response.status}`); }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.variables && data.variables.length > 0) {
+                        const title = document.createElement('h5');
+                        title.textContent = 'Egg 环境变量';
+                        title.style.marginBottom = '1rem';
+                        variablesContainer.appendChild(title);
+
+                        data.variables.forEach(variable => {
+                            const label = document.createElement('label');
+                            label.htmlFor = `env-${variable.env_variable}`;
+                            label.textContent = variable.name;
+                            const input = document.createElement('input');
+                            input.type = 'text';
+                            input.id = `env-${variable.env_variable}`;
+                            input.name = `environment[${variable.env_variable}]`;
+                            input.value = variable.default_value;
+                            input.required = variable.rules.includes('required');
+                            const small = document.createElement('small');
+                            small.textContent = variable.description;
+                            label.appendChild(input);
+                            label.appendChild(small);
+                            variablesContainer.appendChild(label);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching egg variables:', error);
+                    variablesContainer.innerHTML = '<small class="status-expired">加载 Egg 变量失败。</small>';
+                })
+                .finally(() => { varsLoadingMsg.style.display = 'none'; });
+        }
+        
+        function updateEggDependentFields() {
+            const nestId = nestSelect.value;
+            const eggId = eggSelect.value;
+            const selectedOption = eggSelect.options[eggSelect.selectedIndex];
+
+            if (startupInput && selectedOption && selectedOption.dataset.startup) {
+                startupInput.value = selectedOption.dataset.startup;
+            } else if (startupInput) {
+                startupInput.value = '';
+            }
+            fetchEggVariables(nestId, eggId);
+        }
+
+        function fetchEggs(nestId, selectedEggId) {
+            eggLoadingMsg.style.display = 'inline';
+            eggSelect.innerHTML = '<option value="" disabled selected>正在加载...</option>';
+            eggSelect.disabled = true;
+            variablesContainer.innerHTML = '';
+
+            fetch(`/api/nests/${nestId}/eggs`)
+                .then(response => response.json())
+                .then(data => {
+                    eggSelect.innerHTML = '';
+                    if (data.eggs && data.eggs.length > 0) {
+                        data.eggs.forEach(egg => {
+                            const option = document.createElement('option');
+                            option.value = egg.id;
+                            option.textContent = egg.name;
+                            option.dataset.startup = egg.startup;
+                            if (egg.id == selectedEggId) { option.selected = true; }
+                            eggSelect.appendChild(option);
+                        });
+                        updateEggDependentFields();
+                    } else {
+                        eggSelect.innerHTML = '<option value="" disabled>此预设组无可用预设</option>';
+                        if(startupInput) startupInput.value = '';
+                    }
+                })
+                .catch(error => { console.error('Error fetching eggs:', error); eggSelect.innerHTML = '<option value="" disabled>加载预设失败</option>'; })
+                .finally(() => { eggLoadingMsg.style.display = 'none'; eggSelect.disabled = false; });
+        }
+
+        eggSelect.addEventListener('change', updateEggDependentFields);
+        nestSelect.addEventListener('change', function() { fetchEggs(this.value, null); });
+        if (nestSelect.value) { fetchEggs(nestSelect.value, defaultEggId); }
+
+        const nodeSelect = document.getElementById('node_id');
+        const allocationSelect = document.getElementById('allocation_id');
+        const portLoadingMsg = document.getElementById('port-loading-msg');
+
+        function fetchAllocations(nodeId) {
+            portLoadingMsg.style.display = 'inline';
+            allocationSelect.innerHTML = '<option value="" disabled selected>正在加载...</option>';
+            allocationSelect.disabled = true;
+
+            fetch(`/api/nodes/${nodeId}/allocations`)
+                .then(response => response.json())
+                .then(data => {
+                    allocationSelect.innerHTML = '';
+                    if (data.allocations && data.allocations.length > 0) {
+                         data.allocations.forEach(alloc => {
+                            const option = document.createElement('option');
+                            option.value = alloc.id;
+                            option.textContent = `${alloc.alias || alloc.ip}:${alloc.port}`;
+                            allocationSelect.appendChild(option);
+                        });
+                    } else {
+                        allocationSelect.innerHTML = '<option value="" disabled>此节点无可用端口</option>';
+                    }
+                })
+                .catch(error => { console.error('Error fetching allocations:', error); allocationSelect.innerHTML = '<option value="" disabled>加载端口失败</option>'; })
+                .finally(() => { portLoadingMsg.style.display = 'none'; allocationSelect.disabled = false; });
+        }
+
+        nodeSelect.addEventListener('change', function() { fetchAllocations(this.value); });
+        if (nodeSelect.value) { fetchAllocations(nodeSelect.value); }
+    }
+
+    // ---- 系统设置页面 JS ----
+    const settingsNestSelect = document.getElementById('default_nest_id');
+    if (settingsNestSelect) {
+        settingsNestSelect.addEventListener('change', function() {
+            const nestId = this.value;
+            const eggSelect = document.getElementById('default_egg_id');
+            eggSelect.innerHTML = '<option value="" disabled selected>正在加载...</option>';
+            eggSelect.disabled = true;
+
+            if (!nestId) {
+                eggSelect.innerHTML = '<option value="" disabled selected>请先选择一个预设组...</option>';
+                eggSelect.disabled = false;
+                return;
+            }
+            fetch(`/api/nests/${nestId}/eggs`)
+                .then(response => response.json())
+                .then(data => {
+                    eggSelect.innerHTML = '<option value="" disabled selected>请选择一个预设...</option>';
+                    if (data.eggs && data.eggs.length > 0) {
+                        data.eggs.forEach(egg => {
+                            const option = document.createElement('option');
+                            option.value = egg.id;
+                            option.textContent = egg.name;
+                            eggSelect.appendChild(option);
+                        });
+                    } else {
+                        eggSelect.innerHTML = '<option value="" disabled>此预设组无可用预设</option>';
+                    }
+                })
+                .catch(error => { console.error('Error fetching eggs for settings:', error); eggSelect.innerHTML = '<option value="" disabled>加载预设失败</option>'; })
+                .finally(() => { eggSelect.disabled = false; });
+        });
+    }
+});
+</script>
+{% endblock %}

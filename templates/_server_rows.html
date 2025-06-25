@@ -1,0 +1,41 @@
+<!-- templates/_server_rows.html -->
+{% for server in servers %}
+<tr>
+<td><input type="checkbox" name="server_ids" value="{{ server.ptero_server_id }}" form="batch-form"></td>
+<td>
+{% if server.uuid %}
+<a href="{{ PANEL_URL }}/server/{{ server.uuid }}" target="_blank" rel="noopener noreferrer" data-tooltip="Ptero ID: {{ server.ptero_server_id }}">{{ server.server_name }}</a>
+{% else %}
+<a href="javascript:void(0)" data-tooltip="Ptero ID: {{ server.ptero_server_id }}">{{ server.server_name }}</a>
+{% endif %}
+</td>
+<td>
+    <a href="{{ url_for('users_list', search_term=server.owner_username) }}" data-tooltip="{{ server.owner_username }} (ID: {{ server.owner_id or 'N/A' }})">
+        {{ server.owner_username or '未知' }}
+    </a>
+</td>
+<td>
+{% if server.expiration_date %}
+{% set days_left = (server.expiration_date - today).days %}
+{% if days_left < 0 %}<span class="status-expired">{{ server.expiration_date.strftime('%Y-%m-%d') }} (已过期)</span>
+{% elif days_left == 0 %}<span class="status-expiring-today">{{ server.expiration_date.strftime('%Y-%m-%d') }} (今天)</span>
+{% elif days_left <= 7 %}<span class="status-expiring-soon">{{ server.expiration_date.strftime('%Y-%m-%d') }} ({{ days_left }}天)</span>
+{% else %}<span>{{ server.expiration_date.strftime('%Y-%m-%d') }}</span>{% endif %}
+{% else %}<span style="color: grey;">永久</span>{% endif %}
+</td>
+<td>
+{% if server.status == '已冻结' %}<span class="status-suspended">{{ server.status }}</span>
+{% else %}<span class="status-normal">{{ server.status or '正常' }}</span>{% endif %}
+</td>
+<td>
+<div style="display: flex; gap: 0.5rem; align-items: center;">
+<form action="{{ url_for('set_expiry', ptero_id=server.ptero_server_id, **request.args) }}" method="post" style="display: contents;"><input type="number" name="renew_days" value="30" style="width: 120px; margin: 0;"><button type="submit" class="secondary" style="margin: 0;">续期</button></form>
+<form action="{{ url_for('suspend_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post" onsubmit="return confirm('您确定要{% if server.status == '已冻结' %}解冻{% else %}冻结{% endif %}此服务器吗？');" style="display: contents;">
+{% if server.status == '已冻结' %}<button type="submit" class="contrast" style="margin: 0;">解冻</button>
+{% else %}<button type="submit" class="secondary" style="margin: 0;">冻结</button>{% endif %}
+</form>
+<form action="{{ url_for('delete_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post" onsubmit="return confirm('警告！您确定要永久删除此服务器吗？');" style="display: contents;"><button type="submit" class="danger-button" style="margin: 0;">删除</button></form>
+</div>
+</td>
+</tr>
+{% endfor %}

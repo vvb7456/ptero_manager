@@ -1,0 +1,124 @@
+<!-- templates/_dashboard.html (更新为正常服务器指标) -->
+{% if dashboard_data %}
+<section id="dashboard-content">
+    
+    <!-- 核心指标 -->
+    <div class="grid">
+        <article class="metric-card">
+            <h3>{{ dashboard_data.core_metrics.total_users }}</h3>
+            <p>用户总数</p>
+        </article>
+        <article class="metric-card">
+            <h3>{{ dashboard_data.core_metrics.total_servers }}</h3>
+            <p>服务器总数</p>
+        </article>
+        <article class="metric-card">
+            <h3>{{ dashboard_data.core_metrics.normal_servers_count }} / {{ dashboard_data.core_metrics.total_servers }}</h3>
+            <p>正常服务器</p>
+        </article>
+    </div>
+
+    <!-- 服务器状态分布图 -->
+    <article style="margin-top: 2rem;">
+        <header>
+            <hgroup>
+                <h3>服务器状态分布</h3>
+                <p>根据服务器的到期和冻结状态进行的分类统计。</p>
+            </hgroup>
+        </header>
+        <div class="chart-container" style="height: 400px;">
+            <canvas id="serverStatusChart"></canvas>
+        </div>
+    </article>
+
+</section>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const data = {{ dashboard_data | tojson }};
+    
+    const computedStyle = getComputedStyle(document.body);
+    const textColor = computedStyle.getPropertyValue('--color').trim();
+    const gridColor = computedStyle.getPropertyValue('--pico-muted-border-color').trim();
+    
+    const statusLabels = data.status_distribution.labels;
+    const statusCounts = data.status_distribution.counts;
+    const backgroundColors = [
+        'rgba(75, 192, 192, 0.7)',  // Normal
+        'rgba(255, 159, 64, 0.7)',  // Expiring Soon
+        'rgba(255, 99, 132, 0.7)',   // Expired
+        'rgba(153, 102, 255, 0.7)', // Suspended
+        'rgba(201, 203, 207, 0.7)'  // Permanent
+    ];
+    const borderColors = [
+        'rgba(75, 192, 192, 1)',
+        'rgba(255, 159, 64, 1)',
+        'rgba(255, 99, 132, 1)',
+        'rgba(153, 102, 255, 1)',
+        'rgba(201, 203, 207, 1)'
+    ];
+
+    const serverStatusCtx = document.getElementById('serverStatusChart').getContext('2d');
+    new Chart(serverStatusCtx, {
+        type: 'bar',
+        data: {
+            labels: statusLabels,
+            datasets: [{
+                label: '服务器数量',
+                data: statusCounts,
+                backgroundColor: backgroundColors,
+                borderColor: borderColors,
+                borderWidth: 1
+            }]
+        },
+        options: {
+            indexAxis: 'y', // <-- 使其成为水平条形图
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false // 对于彩色条形图，图例是多余的
+                }
+            },
+            scales: {
+                x: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: textColor,
+                        font: {
+                            size: 14 // 增大X轴字体
+                        },
+                        // 确保刻度为整数
+                        callback: function(value) {
+                            if (Math.floor(value) === value) {
+                                return value;
+                            }
+                        }
+                    },
+                    grid: {
+                        color: gridColor
+                    }
+                },
+                y: {
+                    ticks: {
+                        color: textColor,
+                        font: {
+                            size: 14 // 增大Y轴字体
+                        }
+                    },
+                    grid: {
+                        display: false
+                    }
+                }
+            }
+        }
+    });
+});
+</script>
+
+{% else %}
+<article>
+    <p>正在加载仪表盘数据，或者 API 未配置/连接失败。</p>
+    <p>请确保已在 <a href="{{ url_for('settings_page') }}">系统设置</a> 中正确配置 Pterodactyl API URL 和 Key。</p>
+</article>
+{% endif %}

@@ -1,0 +1,75 @@
+<!-- templates/_server_list.html (v16: 无限滚动改造) -->
+<div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 2rem; margin-bottom: 1rem;">
+    <form id="batch-form" action="{{ url_for('batch_process') }}" method="post" style="margin: 0;">
+        {% for key, value in request.args.to_dict().items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+        <div style="display: flex; align-items: flex-end; gap: 1rem;">
+            <div>
+                <label for="batch-action" style="white-space: nowrap;"><strong>批量操作</strong></label>
+                <select name="action" id="batch-action" required>
+                    <option value="" disabled selected>选择...</option>
+                    <option value="suspend">冻结</option>
+                    <option value="unsuspend">解冻</option>
+                    <option value="renew">续期</option>
+                    <option value="delete">删除</option>
+                    <option value="email">发送通知邮件</option>
+                </select>
+            </div>
+            <div id="renew-options" style="display: none;">
+                <input type="number" name="renew_days" placeholder="天数" style="width: 100px;">
+            </div>
+            <div><button id="batch-submit" type="submit" style="width: auto;">执行</button></div>
+        </div>
+    </form>
+    <form id="filter-form" action="{{ url_for('servers_list') }}" method="get" style="display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin: 0;">
+        <input type="hidden" name="owner_id" value="{{ owner_id or '' }}">
+        <div>
+            <label for="search_term" style="margin-bottom: 0.25rem; font-size: 0.875rem;">搜索</label>
+            <input type="search" name="search_term" id="search_term" placeholder="服务器名、所有者..." value="{{ request.args.get('search_term', '') }}" onchange="this.form.submit()" style="min-width: 180px;">
+        </div>
+        <div>
+            <label for="filter_status" style="margin-bottom: 0.25rem; font-size: 0.875rem;">状态</label>
+            <select name="filter_status" id="filter_status" onchange="this.form.submit()">
+                <option value="all" {% if request.args.get('filter_status', 'all') == 'all' %}selected{% endif %}>全部</option>
+                <option value="normal" {% if request.args.get('filter_status') == 'normal' %}selected{% endif %}>正常</option>
+                <option value="expiring_soon" {% if request.args.get('filter_status') == 'expiring_soon' %}selected{% endif %}>即将到期</option>
+                <option value="expired" {% if request.args.get('filter_status') == 'expired' %}selected{% endif %}>已到期</option>
+                <option value="permanent" {% if request.args.get('filter_status') == 'permanent' %}selected{% endif %}>永久</option>
+            </select>
+        </div>
+        <div>
+            <label for="sort_by" style="margin-bottom: 0.25rem; font-size: 0.875rem;">排序</label>
+            <select name="sort_by" id="sort_by" onchange="this.form.submit()">
+                <option value="expiration_date" {% if request.args.get('sort_by', 'expiration_date') == 'expiration_date' %}selected{% endif %}>到期时间</option>
+                <option value="ptero_server_id" {% if request.args.get('sort_by') == 'ptero_server_id' %}selected{% endif %}>服务器 ID</option>
+                <option value="server_name" {% if request.args.get('sort_by') == 'server_name' %}selected{% endif %}>服务器名称</option>
+            </select>
+        </div>
+        <div>
+            <label for="sort_order" style="margin-bottom: 0.25rem; font-size: 0.875rem;">顺序</label>
+            <select name="sort_order" id="sort_order" onchange="this.form.submit()">
+                <option value="asc" {% if request.args.get('sort_order', 'asc') == 'asc' %}selected{% endif %}>升序</option>
+                <option value="desc" {% if request.args.get('sort_order', 'desc') == 'desc' %}selected{% endif %}>降序</option>
+            </select>
+        </div>
+    </form>
+</div>
+
+{% if servers %}
+<div class="table-scroll-container">
+    <table role="grid">
+        <thead>
+            <tr>
+                <th style="width: 40px;"><input type="checkbox" id="select-all"></th>
+                <th>服务器名称</th><th>所有者</th><th>到期时间</th><th>面板状态</th>
+                <th style="min-width: 420px;">操作</th>
+            </tr>
+        </thead>
+        <tbody id="servers-tbody">
+            {% include '_server_rows.html' %}
+        </tbody>
+    </table>
+    <div id="loading-indicator" style="display: none; text-align: center; padding: 1rem;">正在加载更多...</div>
+</div>
+{% else %}
+<p>没有找到符合条件的服务器。请尝试其他筛选选项、更改搜索词或进行同步。</p>
+{% endif %}

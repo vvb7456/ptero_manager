@@ -1,0 +1,46 @@
+<!-- templates/edit_user.html (修复 block 名称不匹配问题) -->
+{% extends "layout.html" %}
+
+{% block title %}编辑用户 - {{ user.username }}{% endblock %}
+
+{% block page_content %}
+<nav>
+    <ul><li><strong>编辑用户</strong></li></ul>
+    <!-- 返回时也带上所有筛选和排序状态 -->
+    <ul><li><a href="{{ url_for('users_list', **request.args) }}">返回用户列表</a></li></ul>
+</nav>
+<article>
+    <header>
+        <h2>{{ user.username }}</h2>
+        <p>Pterodactyl User ID: {{ user.id }}</p>
+    </header>
+    <form method="post">
+        <div class="grid">
+            <label for="username">
+                用户名
+                <input type="text" id="username" name="username" value="{{ user.username }}" required>
+            </label>
+            <label for="email">
+                邮箱
+                <input type="email" id="email" name="email" value="{{ user.email }}" required>
+            </label>
+        </div>
+
+        <div class="grid">
+            <label for="first_name">
+                名 (First Name)
+                <input type="text" id="first_name" name="first_name" value="{{ user.first_name or '' }}">
+            </label>
+            <label for="last_name">
+                姓 (Last Name)
+                <input type="text" id="last_name" name="last_name" value="{{ user.last_name or '' }}">
+            </label>
+        </div>
+        
+        <label for="password">密码</label>
+        <input type="password" id="password" name="password" placeholder="留空则不修改密码">
+        
+        <button type="submit">保存更改</button>
+    </form>
+</article>
+{% endblock %}

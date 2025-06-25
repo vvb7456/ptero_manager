@@ -1,0 +1,80 @@
+<!-- templates/_automation.html (增加邮件独立执行时间) -->
+<form method="post">
+    <hgroup>
+        <h3>自动化任务设置</h3>
+        <p>配置后台自动执行的任务，如冻结、删除和邮件提醒。</p>
+        <p style="color: var(--pico-primary-focus);"><strong>重要提示：</strong>修改并保存任何设置后，您必须 <strong>重启 Web 应用</strong> 才能使新的调度计划生效。</p>
+    </hgroup>
+    
+    <!-- 任务执行时间 (冻结/删除) -->
+    <fieldset>
+        <legend><strong>通用任务时间 (冻结与删除)</strong></legend>
+        <p>为避免资源冲突和确保逻辑清晰，冻结和删除任务共享同一个执行时间，建议设在凌晨。</p>
+        <div class="grid">
+            <label for="automation_run_hour">
+                每日执行时间 (小时)
+                <input type="number" id="automation_run_hour" name="AUTOMATION_RUN_HOUR" value="{{ settings.AUTOMATION_RUN_HOUR }}" min="0" max="23" required>
+            </label>
+            <label for="automation_run_minute">
+                每日执行时间 (分钟)
+                <input type="number" id="automation_run_minute" name="AUTOMATION_RUN_MINUTE" value="{{ settings.AUTOMATION_RUN_MINUTE }}" min="0" max="59" required>
+            </label>
+        </div>
+    </fieldset>
+
+    <hr>
+    
+    <!-- 自动冻结 -->
+    <fieldset>
+        <legend><strong>自动冻结任务</strong></legend>
+        <label for="automation_suspend_enabled">
+            <input type="checkbox" id="automation_suspend_enabled" name="AUTOMATION_SUSPEND_ENABLED" role="switch" {% if settings.AUTOMATION_SUSPEND_ENABLED %}checked{% endif %}>
+            启用自动冻结
+        </label>
+        <small>每日在指定时间，自动冻结所有 **昨天** 到期的服务器 (例如，6月20日到期的服务器，会在6月21日凌晨被冻结)。</small>
+    </fieldset>
+
+    <hr>
+
+    <!-- 自动删除 -->
+    <fieldset>
+        <legend><strong>自动删除任务</strong></legend>
+        <label for="automation_delete_enabled">
+            <input type="checkbox" id="automation_delete_enabled" name="AUTOMATION_DELETE_ENABLED" role="switch" {% if settings.AUTOMATION_DELETE_ENABLED %}checked{% endif %}>
+            启用自动删除
+        </label>
+        <small>每日在指定时间，自动删除所有已到期超过指定天数的服务器。</small>
+        
+        <label for="automation_delete_days">
+            到期后多少天删除
+            <input type="number" id="automation_delete_days" name="AUTOMATION_DELETE_DAYS" value="{{ settings.AUTOMATION_DELETE_DAYS }}" min="0" required>
+            <small>设置为 0 将在服务器到期后的第二天就删除。</small>
+        </label>
+    </fieldset>
+
+    <hr>
+
+    <!-- 自动邮件提醒 -->
+    <fieldset>
+        <legend><strong>自动邮件提醒任务</strong></legend>
+        <label for="automation_email_enabled">
+            <input type="checkbox" id="automation_email_enabled" name="AUTOMATION_EMAIL_ENABLED" role="switch" {% if settings.AUTOMATION_EMAIL_ENABLED %}checked{% endif %}>
+            启用自动邮件提醒
+        </label>
+        <small>每日在指定时间，为次日即将到期的服务器所有者发送提醒邮件。建议设在白天。</small>
+        
+        <div class="grid">
+            <label for="automation_email_run_hour">
+                邮件提醒执行时间 (小时)
+                <input type="number" id="automation_email_run_hour" name="AUTOMATION_EMAIL_RUN_HOUR" value="{{ settings.AUTOMATION_EMAIL_RUN_HOUR }}" min="0" max="23" required>
+            </label>
+            <label for="automation_email_run_minute">
+                邮件提醒执行时间 (分钟)
+                <input type="number" id="automation_email_run_minute" name="AUTOMATION_EMAIL_RUN_MINUTE" value="{{ settings.AUTOMATION_EMAIL_RUN_MINUTE }}" min="0" max="59" required>
+            </label>
+        </div>
+    </fieldset>
+    
+    <br>
+    <button type="submit">保存设置</button>
+</form>

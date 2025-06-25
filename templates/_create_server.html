@@ -1,0 +1,120 @@
+<!-- templates/_create_server.html (增加启动指令输入框) -->
+<header>
+    <p>为 Pterodactyl 面板上的一个已存在用户创建一台新服务器，并可自定义资源配置。</p>
+</header>
+<form action="{{ url_for('create_server_page') }}" method="post" id="create-server-form" data-default-egg-id="{{ DEFAULT_EGG_ID }}">
+    <!-- 基础信息 -->
+    <div class="grid">
+        <div>
+            <label for="user_id">选择用户 (可搜索)</label>
+            <select id="user_id" name="user_id" class="form-control" required style="width: 100%;">
+                <option></option>
+                {% for user in all_users %}
+                    <option value="{{ user.id }}">{{ user.username }} ({{ user.email }})</option>
+                {% endfor %}
+            </select>
+            {% if not all_users %}<small class="status-expired">警告：无法获取用户列表！</small>{% endif %}
+        </div>
+        <div>
+            <label for="server_name">服务器名称</label>
+            <input type="text" id="server_name" name="server_name" placeholder="选择用户后自动生成" required>
+        </div>
+    </div>
+
+    <!-- 预设组和预设 -->
+    <div class="grid">
+        <div>
+            <label for="nest_id">选择预设组 (Nest)</label>
+            <select id="nest_id" name="nest_id" required>
+                <option value="" disabled>请先选择一个预设组...</option>
+                {% for nest in all_nests %}
+                    <option value="{{ nest.id }}" {% if nest.id == DEFAULT_NEST_ID %}selected{% endif %}>{{ nest.name }}</option>
+                {% endfor %}
+                {% if not all_nests %}<option value="" disabled>未能加载预设组</option>{% endif %}
+            </select>
+        </div>
+        <div>
+            <label for="egg_id">选择预设 (Egg)</label>
+            <select id="egg_id" name="egg_id" required>
+                <option value="" disabled selected>请先选择一个预设组...</option>
+            </select>
+            <small id="egg-loading-msg" style="display: none;">正在加载预设...</small>
+        </div>
+    </div>
+
+    <!-- 动态环境变量容器 -->
+    <div id="egg-variables-container" style="margin-top: 1.5rem;">
+        <small id="vars-loading-msg" style="display: none;">正在加载 Egg 变量...</small>
+    </div>
+    
+    <label for="docker_image">Docker 镜像</label>
+    <input type="text" id="docker_image" name="docker_image" value="{{ DOCKER_IMAGE }}">
+    
+    <!-- 启动指令 -->
+    <label for="startup_command">启动指令</label>
+    <input type="text" id="startup_command" name="startup_command" placeholder="选择 Egg 后自动填充" required>
+    <small>此指令将用于启动服务器。它会根据所选的 Egg 自动填充，但您可以根据需要进行修改。</small>
+
+    <!-- 节点和端口 -->
+    <div class="grid">
+        <div>
+            <label for="node_id">选择节点</label>
+            <select id="node_id" name="node_id" required>
+                <option value="" disabled>请先选择一个节点...</option>
+                {% for node in all_nodes %}
+                    <option value="{{ node.id }}" {% if node.id == DEFAULT_NODE_ID %}selected{% endif %}>{{ node.name }}</option>
+                {% endfor %}
+            </select>
+             {% if not all_nodes %}<small class="status-expired">警告：无法获取节点列表！</small>{% endif %}
+        </div>
+        <div>
+            <label for="allocation_id">服务器主端口</label>
+            <select id="allocation_id" name="allocation_id" required>
+                <option value="" disabled selected>请先选择一个节点...</option>
+            </select>
+            <small id="port-loading-msg" style="display: none;">正在加载端口...</small>
+        </div>
+    </div>
+
+    <hr>
+    
+    <!-- 资源配置 -->
+    <label><strong>资源配置</strong> (留空则使用 .env 中的默认值)</label>
+    <div class="grid">
+        <label for="memory">
+            内存 (MB)
+            <input type="number" id="memory" name="memory" placeholder="{{ defaults.memory }}">
+        </label>
+        <label for="disk">
+            磁盘 (MB)
+            <input type="number" id="disk" name="disk" placeholder="{{ defaults.disk }}">
+        </label>
+        <label for="cpu">
+            CPU 限制 (%)
+            <input type="number" id="cpu" name="cpu" placeholder="{{ defaults.cpu }}">
+        </label>
+    </div>
+    
+    <div class="grid">
+        <label for="databases">
+            数据库数量
+            <input type="number" id="databases" name="databases" placeholder="{{ defaults.databases }}">
+        </label>
+        <label for="backups">
+            备份数量
+            <input type="number" id="backups" name="backups" placeholder="{{ defaults.backups }}">
+        </label>
+        <label for="allocations">
+            额外端口数量
+            <input type="number" id="allocations" name="allocations" placeholder="{{ defaults.allocations }}">
+        </label>
+    </div>
+    
+    <hr>
+    
+    <!-- 有效期和创建按钮 -->
+    <label for="expiration_days">初始有效天数</label>
+    <input type="number" id="expiration_days" name="expiration_days" value="30" required>
+    
+    <button type="submit">立即创建</button>
+</form>

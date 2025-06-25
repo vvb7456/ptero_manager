@@ -1,0 +1,1082 @@
+
+import os
+import re
+import math
+import json
+import requests
+import smtplib
+import time
+import pytz
+import logging
+from email.mime.text import MIMEText
+from email.header import Header
+from email.utils import formataddr
+from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import func, case, or_, desc, asc
+from dotenv import load_dotenv
+from datetime import date, timedelta, datetime
+from urllib.parse import urlencode
+from flask_apscheduler import APScheduler
+
+# --- 日志配置 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# --- 全局时区配置 ---
+LOCAL_TZ = pytz.timezone('Asia/Shanghai')
+
+# --- 配置管理 ---
+class ConfigManager:
+    def __init__(self):
+        self.settings_file = 'settings.json'
+        self.config = {}
+        self.load_config()
+
+    def load_config(self):
+        load_dotenv()
+        self.config = {
+            'SECRET_KEY': os.getenv('SECRET_KEY', 'a_default_secret_key_for_dev'),
+            'ADMIN_PASSWORD': os.getenv('ADMIN_PASSWORD', 'changeme'), # 添加默认密码
+            'PTERO_PANEL_URL': os.getenv('PTERO_PANEL_URL', ''),
+            'PTERO_API_KEY': os.getenv('PTERO_API_KEY', ''),
+            'DEFAULT_NEST_ID': int(os.getenv('DEFAULT_NEST_ID', 1)),
+            'DEFAULT_EGG_ID': int(os.getenv('DEFAULT_EGG_ID', 1)),
+            'DEFAULT_NODE_ID': int(os.getenv('DEFAULT_NODE_ID', 1)),
+            'DOCKER_IMAGE': os.getenv('DOCKER_IMAGE', 'ghcr.io/pterodactyl/yolks:java_17'),
+            'DEFAULT_CPU': int(os.getenv('DEFAULT_CPU', 100)),
+            'DEFAULT_MEMORY': int(os.getenv('DEFAULT_MEMORY', 1024)),
+            'DEFAULT_DISK': int(os.getenv('DEFAULT_DISK', 5120)),
+            'DEFAULT_DATABASES': int(os.getenv('DEFAULT_DATABASES', 0)),
+            'DEFAULT_BACKUPS': int(os.getenv('DEFAULT_BACKUPS', 0)),
+            'DEFAULT_ALLOCATIONS': int(os.getenv('DEFAULT_ALLOCATIONS', 1)),
+            'SMTP_HOST': os.getenv('SMTP_HOST', ''),
+            'SMTP_PORT': int(os.getenv('SMTP_PORT', 587)),
+            'SMTP_USE_SSL': os.getenv('SMTP_USE_SSL', 'true').lower() in ('true', '1', 't'),
+            'SMTP_PASSWORD': os.getenv('SMTP_PASSWORD', ''),
+            'SENDER_EMAIL': os.getenv('SENDER_EMAIL', ''),
+            'EMAIL_SEND_DELAY': int(os.getenv('EMAIL_SEND_DELAY', 2)),
+            'AUTOMATION_SUSPEND_ENABLED': os.getenv('AUTOMATION_SUSPEND_ENABLED', 'false').lower() in ('true', '1', 't'),
+            'AUTOMATION_DELETE_ENABLED': os.getenv('AUTOMATION_DELETE_ENABLED', 'false').lower() in ('true', '1', 't'),
+            'AUTOMATION_EMAIL_ENABLED': os.getenv('AUTOMATION_EMAIL_ENABLED', 'false').lower() in ('true', '1', 't'),
+            'AUTOMATION_RUN_HOUR': int(os.getenv('AUTOMATION_RUN_HOUR', 2)),
+            'AUTOMATION_RUN_MINUTE': int(os.getenv('AUTOMATION_RUN_MINUTE', 0)),
+            'AUTOMATION_DELETE_DAYS': int(os.getenv('AUTOMATION_DELETE_DAYS', 14)),
+            'AUTOMATION_EMAIL_RUN_HOUR': int(os.getenv('AUTOMATION_EMAIL_RUN_HOUR', 10)),
+            'AUTOMATION_EMAIL_RUN_MINUTE': int(os.getenv('AUTOMATION_EMAIL_RUN_MINUTE', 0)),
+            'UI_SYSTEM_NAME': os.getenv('UI_SYSTEM_NAME', 'Pterodactyl 管理面板'),
+            'UI_BANNER_URL': os.getenv('UI_BANNER_URL', ''),
+        }
+        
+        try:
+            with open(self.settings_file, 'r', encoding='utf-8') as f:
+                ui_settings = json.load(f)
+                int_keys = [
+                    'DEFAULT_NEST_ID', 'DEFAULT_EGG_ID', 'DEFAULT_NODE_ID', 'DEFAULT_CPU', 
+                    'DEFAULT_MEMORY', 'DEFAULT_DISK', 'DEFAULT_DATABASES', 'DEFAULT_BACKUPS', 
+                    'DEFAULT_ALLOCATIONS', 'SMTP_PORT', 'EMAIL_SEND_DELAY',
+                    'AUTOMATION_RUN_HOUR', 'AUTOMATION_RUN_MINUTE', 'AUTOMATION_DELETE_DAYS',
+                    'AUTOMATION_EMAIL_RUN_HOUR', 'AUTOMATION_EMAIL_RUN_MINUTE'
+                ]
+                for key in int_keys:
+                    if key in ui_settings and ui_settings[key] is not None and ui_settings[key] != '':
+                        ui_settings[key] = int(ui_settings[key])
+                
+                bool_keys = [
+                    'SMTP_USE_SSL', 'AUTOMATION_SUSPEND_ENABLED', 
+                    'AUTOMATION_DELETE_ENABLED', 'AUTOMATION_EMAIL_ENABLED'
+                ]
+                for key in bool_keys:
+                    if key in ui_settings:
+                        ui_settings[key] = str(ui_settings[key]).lower() in ('true', '1', 't')
+                
+                self.config.update(ui_settings)
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+        sender_emails_str = self.config.get('SENDER_EMAIL', '')
+        if isinstance(sender_emails_str, str) and sender_emails_str:
+            self.config['SENDER_EMAIL_LIST'] = [email.strip() for email in sender_emails_str.split(',') if email.strip()]
+        else:
+            self.config['SENDER_EMAIL_LIST'] = []
+
+    def save_config(self, new_settings):
+        try:
+            with open(self.settings_file, 'r', encoding='utf-8') as f:
+                data_to_save = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data_to_save = {}
+        
+        data_to_save.update(new_settings)
+
+        with open(self.settings_file, 'w', encoding='utf-8') as f:
+            json.dump(data_to_save, f, ensure_ascii=False, indent=4)
+        
+        # 重新加载配置到当前worker的内存中
+        self.load_config()
+
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+
+config_manager = ConfigManager()
+email_sender_index = 0
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = config_manager.get('SECRET_KEY')
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///../instance/project.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SCHEDULER_TIMEZONE'] = LOCAL_TZ
+
+db = SQLAlchemy(app)
+scheduler = APScheduler()
+
+# --- v27 Bug Fix: Re-define global constants for template files ---
+EMAIL_TEMPLATE_FILE = 'email_template.json'
+REMINDER_TEMPLATE_FILE = 'reminder_template.json'
+
+
+@app.before_request
+def check_auth():
+    """全局请求拦截器，用于验证用户是否已登录。"""
+    # 如果用户未登录，并且请求的端点不是登录页面或静态文件，则重定向到登录页
+    if not session.get('logged_in') and request.endpoint not in ('login', 'static'):
+        return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        password_attempt = request.form.get('password')
+        admin_password = config_manager.get('ADMIN_PASSWORD')
+        if password_attempt == admin_password:
+            session['logged_in'] = True
+            flash('登录成功！', 'success')
+            # 登录成功后，重定向到之前尝试访问的页面或仪表盘
+            next_url = request.args.get('next') or url_for('dashboard')
+            return redirect(next_url)
+        else:
+            flash('密码错误，请重试。', 'error')
+            return redirect(url_for('login'))
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    flash('您已成功退出登录。', 'info')
+    return redirect(url_for('login'))
+
+
+def get_today():
+    return datetime.now(LOCAL_TZ).date()
+
+@app.context_processor
+def inject_ui_settings():
+    return {
+        'UI_SYSTEM_NAME': config_manager.get('UI_SYSTEM_NAME'),
+        'UI_BANNER_URL': config_manager.get('UI_BANNER_URL')
+    }
+
+class Server(db.Model):
+    id=db.Column(db.Integer,primary_key=True)
+    uuid = db.Column(db.String(36), unique=True, nullable=False)
+    ptero_server_id=db.Column(db.Integer,nullable=False)
+    server_name=db.Column(db.String(100),nullable=False)
+    expiration_date=db.Column(db.Date,nullable=True)
+    owner_id=db.Column(db.Integer,nullable=True)
+    owner_username=db.Column(db.String(100),nullable=True)
+    status=db.Column(db.String(50),nullable=True)
+    def __repr__(self): return f'<Server {self.server_name}>'
+
+class Pagination:
+    def __init__(self, page, per_page, total_count, items):
+        self.page, self.per_page, self.total, self.items = page, per_page, total_count, items
+    @property
+    def pages(self): return math.ceil(self.total / self.per_page) if self.per_page > 0 else 0
+    @property
+    def has_prev(self): return self.page > 1
+    @property
+    def prev_num(self): return self.page - 1
+    @property
+    def has_next(self): return self.page < self.pages
+    @property
+    def next_num(self): return self.page + 1
+
+def get_api_headers():
+    return {"Authorization": f"Bearer {config_manager.get('PTERO_API_KEY')}", "Accept": "application/json", "Content-Type": "application/json"}
+
+def handle_api_error(e, action):
+    error_detail = str(e)
+    try:
+        if e.response is not None:
+            response_json = e.response.json()
+            errors = response_json.get('errors', [])
+            error_messages = []
+            for err in errors:
+                detail = err.get('detail', 'Unknown error')
+                meta = err.get('meta')
+                if meta: detail += f" (Meta: {json.dumps(meta)})"
+                error_messages.append(f"{err.get('code', 'N/A')}: {detail}")
+            if error_messages: error_detail = '; '.join(error_messages)
+    except Exception: pass
+    flash(f"{action} API 请求失败: {error_detail}", "error")
+
+def get_ptero_data(endpoint, params=None):
+    all_items = []
+    page = 1
+    panel_url = config_manager.get('PTERO_PANEL_URL')
+    if not panel_url or not config_manager.get('PTERO_API_KEY'): return None
+    base_url = f"{panel_url.rstrip('/')}/api/application/{endpoint}"
+    headers = get_api_headers()
+    is_single_item_endpoint = re.search(r'/\d+(\?|$)', endpoint)
+    while True:
+        try:
+            query_params = {'page': page, 'per_page': 100}
+            if params: query_params.update(params)
+            final_params = query_params if not is_single_item_endpoint else params
+            res = requests.get(base_url, headers=headers, params=final_params, timeout=15)
+            res.raise_for_status()
+            data = res.json()
+            if data.get('object') != 'list':
+                return [data] if 'attributes' in data else []
+            current_items = data.get('data', [])
+            if not current_items: break
+            all_items.extend(current_items)
+            meta = data.get('meta', {}).get('pagination', {})
+            current_page = meta.get('current_page')
+            total_pages = meta.get('total_pages')
+            if is_single_item_endpoint or current_page is None or total_pages is None or current_page >= total_pages: break
+            page += 1
+        except requests.RequestException as e:
+            app.logger.error(f"Error fetching {endpoint}: {e}")
+            handle_api_error(e, f"获取 {endpoint}")
+            return None
+    return all_items
+
+def get_ptero_single_item(endpoint):
+    panel_url = config_manager.get('PTERO_PANEL_URL')
+    if not panel_url or not config_manager.get('PTERO_API_KEY'): return None
+    try:
+        res = requests.get(f"{panel_url.rstrip('/')}/api/application/{endpoint}", headers=get_api_headers(), timeout=10)
+        res.raise_for_status()
+        return res.json().get('attributes')
+    except requests.RequestException: return None
+
+def _sync_database_with_pterodactyl():
+    app.logger.info("开始与 Pterodactyl API 进行数据库同步...")
+    api_servers_list = get_ptero_data("servers", params={'include': 'user'})
+    if api_servers_list is None:
+        app.logger.error("无法从 API 获取服务器列表，同步中止。")
+        return False
+
+    local_servers = {s.ptero_server_id: s for s in Server.query.all()}
+    api_server_ids = {s['attributes']['id'] for s in api_servers_list}
+    
+    added_count, updated_count, deleted_count = 0, 0, 0
+
+    for server_data in api_servers_list:
+        attrs = server_data['attributes']
+        ptero_id = attrs['id']
+        
+        owner_username = '未知'
+        if 'user' in attrs.get('relationships', {}) and attrs['relationships']['user'].get('attributes'):
+            owner_username = attrs['relationships']['user']['attributes'].get('username', '未知')
+
+        if ptero_id in local_servers:
+            local_server = local_servers[ptero_id]
+            is_updated = False
+            if local_server.server_name != attrs['name']: local_server.server_name = attrs['name']; is_updated=True
+            if local_server.owner_id != attrs['user']: local_server.owner_id = attrs['user']; is_updated=True
+            if local_server.owner_username != owner_username: local_server.owner_username = owner_username; is_updated=True
+            if local_server.uuid != attrs['uuid']: local_server.uuid = attrs['uuid']; is_updated=True
+            
+            # --- 新增的修复逻辑 ---
+            api_install_status = attrs.get('status') # 获取API返回的安装状态，例如 "installing" 或 null
+            if local_server.status == '安装中' and api_install_status != 'installing':
+                local_server.status = None # 如果本地是“安装中”但API显示已完成，则清除状态
+                is_updated = True
+            # --- 修复逻辑结束 ---
+
+            api_is_suspended = attrs.get('suspended', False)
+            if api_is_suspended and local_server.status != '已冻结':
+                local_server.status = '已冻结'; is_updated=True
+            elif not api_is_suspended and local_server.status == '已冻结':
+                 local_server.status = None; is_updated=True
+
+            if is_updated:
+                updated_count += 1
+        else:
+            expiration_date = None
+            description = attrs.get('description', '')
+            match = re.search(r'到期时间[：:]\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', description or '')
+            if match:
+                try: expiration_date = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+                except ValueError: pass
+            
+            new_server = Server(
+                ptero_server_id=ptero_id, uuid=attrs['uuid'], server_name=attrs['name'],
+                owner_id=attrs['user'], owner_username=owner_username,
+                expiration_date=expiration_date, status='已冻结' if attrs.get('suspended') else None
+            )
+            db.session.add(new_server)
+            added_count += 1
+
+    for local_id, local_server in local_servers.items():
+        if local_id not in api_server_ids:
+            db.session.delete(local_server)
+            deleted_count += 1
+            
+    try:
+        if added_count > 0 or updated_count > 0 or deleted_count > 0:
+            db.session.commit()
+            app.logger.info(f"数据库同步成功。新增: {added_count}, 更新: {updated_count}, 删除: {deleted_count}。")
+        else:
+            app.logger.info("数据库与 API 数据一致，无需改动。")
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"同步过程中发生数据库错误: {e}")
+        return False
+    return True
+
+def update_ptero_description(server_ptero_id, new_expiration_date=None):
+    panel_url = config_manager.get('PTERO_PANEL_URL')
+    if not panel_url: return False
+
+    server_data_list = get_ptero_data(f"servers/{server_ptero_id}")
+    if not server_data_list:
+        flash(f"无法从 API 获取服务器 {server_ptero_id} 的当前详情，无法更新描述。", "error")
+        return False
+    server_details_from_api = server_data_list[0]['attributes']
+
+    current_desc = server_details_from_api.get('description', '') or ''
+    match = re.search(r'到期时间[：:]\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', current_desc)
+    desc_date = None
+    if match:
+        try: desc_date = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError: pass
+
+    if (new_expiration_date and desc_date == new_expiration_date) or (not new_expiration_date and not desc_date):
+        return True
+
+    new_desc_base = re.sub(r'到期时间[：:][^\n]*\n?|\n?到期时间[：:][^\n]*', '', current_desc, flags=re.MULTILINE).strip()
+    new_desc = f"到期时间：{new_expiration_date.strftime('%Y/%m/%d')}\n{new_desc_base}".strip() if new_expiration_date else new_desc_base
+    
+    details_payload = {
+        "name": server_details_from_api['name'], 
+        "user": server_details_from_api['user'], 
+        "external_id": server_details_from_api.get('external_id'), 
+        "description": new_desc
+    }
+    
+    try:
+        res = requests.patch(f"{panel_url.rstrip('/')}/api/application/servers/{server_ptero_id}/details", headers=get_api_headers(), json=details_payload, timeout=20)
+        res.raise_for_status()
+        app.logger.info(f"成功将服务器 {server_ptero_id} 的描述更新为新到期时间。")
+        return True
+    except requests.RequestException as e:
+        app.logger.error(f"更新服务器 {server_ptero_id} 描述时发生 API 错误: {e}")
+        handle_api_error(e, f"更新服务器 {server_ptero_id} 的描述")
+        return False
+
+def create_ptero_server(user_id, server_name, expiration_days, node_id, allocation_id, egg_id, docker_image, startup_command, environment, cpu, memory, disk, databases, backups, allocations):
+    expiration_date = get_today() + timedelta(days=expiration_days)
+    description = f"到期时间：{expiration_date.strftime('%Y/%m/%d')}"
+    api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers"
+    payload = {"name": server_name, "user": user_id, "egg": egg_id, "description": description, "docker_image": docker_image, "startup": startup_command, "environment": environment, "limits": {"memory": memory, "swap": 0, "disk": disk, "io": 500, "cpu": cpu}, "feature_limits": {"databases": databases, "allocations": allocations, "backups": backups}, "allocation": {"default": allocation_id}}
+    try:
+        res = requests.post(api_url, headers=get_api_headers(), json=payload, timeout=20)
+        res.raise_for_status()
+        server_data = res.json().get('attributes')
+        user_info = get_ptero_single_item(f"users/{user_id}")
+        owner_username = user_info.get('username', '未知') if user_info else '未知'
+        new_server = Server(ptero_server_id=server_data.get('id'), uuid=server_data.get('uuid'), server_name=server_data.get('name'), owner_id=server_data.get('user'), owner_username=owner_username, expiration_date=expiration_date, status="安装中")
+        db.session.add(new_server)
+        db.session.commit()
+        return server_data
+    except requests.RequestException as e:
+        handle_api_error(e, "创建服务器")
+        return None
+
+def load_email_template():
+    try:
+        with open(EMAIL_TEMPLATE_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError): return {"subject": "通知", "body": "您好，这是一封通知邮件。", "panel_name": "我的面板"}
+
+def save_email_template(data):
+    with open(EMAIL_TEMPLATE_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
+
+def load_reminder_template():
+    try:
+        with open(REMINDER_TEMPLATE_FILE, 'r', encoding='utf-8') as f: return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"subject": "【重要提醒】您的服务器即将到期", "body": "尊敬的 {{username}} 用户, \n\n您好！您的 {{server_count}} 台服务器将于 {{expiration_date}} 到期。\n\n服务器列表:\n{{server_list}}\n\n请及时处理。"}
+
+def save_reminder_template(data):
+    with open(REMINDER_TEMPLATE_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
+
+def send_email(recipient_email, subject_template, body_template, context):
+    global email_sender_index
+    cfg = config_manager.config
+    sender_email_list = cfg.get('SENDER_EMAIL_LIST', [])
+    if not all([cfg.get('SMTP_HOST'), cfg.get('SMTP_PORT'), cfg.get('SMTP_PASSWORD')]) or not sender_email_list:
+        app.logger.error("SMTP配置不完整或发件人邮箱池为空，请检查系统设置。")
+        return False, "SMTP配置不完整或发件人邮箱池为空"
+
+    current_sender_email = sender_email_list[email_sender_index % len(sender_email_list)]
+    email_sender_index += 1
+    
+    app.logger.info(f"准备向 {recipient_email} 发送邮件 (使用发件人/登录账户: {current_sender_email})...")
+    subject, body = subject_template, body_template
+    for key, value in context.items():
+        subject = subject.replace(key, str(value))
+        body = body.replace(key, str(value))
+    
+    msg = MIMEText(body, 'plain', 'utf-8')
+    panel_name_display = context.get('{{panel_name}}', 'Pterodactyl')
+    msg['From'] = formataddr((Header(panel_name_display, 'utf-8').encode(), current_sender_email))
+    msg['To'] = recipient_email
+    msg['Subject'] = Header(subject, 'utf-8')
+
+    try:
+        app.logger.info(f"正在连接 SMTP 服务器: {cfg['SMTP_HOST']}:{cfg['SMTP_PORT']} (SSL: {cfg['SMTP_USE_SSL']})")
+        server_class = smtplib.SMTP_SSL if cfg['SMTP_USE_SSL'] else smtplib.SMTP
+        with server_class(cfg['SMTP_HOST'], int(cfg['SMTP_PORT']), timeout=20) as server:
+            if not cfg['SMTP_USE_SSL']: server.starttls()
+            server.login(current_sender_email, cfg['SMTP_PASSWORD'])
+            server.sendmail(current_sender_email, [recipient_email], msg.as_string())
+        app.logger.info(f"邮件已成功发送至 {recipient_email}")
+        return True, "发送成功"
+    except Exception as e:
+        app.logger.error(f"邮件发送失败 to {recipient_email}: {e}", exc_info=True)
+        return False, str(e)
+
+def get_redirect_params(form_data):
+    view_args = {}
+    valid_keys = ['page', 'per_page', 'filter_status', 'sort_by', 'sort_order', 'owner_id', 'search_term', 'filter_server_status']
+    for key in valid_keys:
+        if key in form_data: view_args[key] = form_data[key]
+    return view_args
+
+def get_processed_servers_data(args):
+    query = Server.query
+    filter_status = args.get('filter_status', 'all')
+    sort_by = args.get('sort_by', 'expiration_date')
+    sort_order = args.get('sort_order', 'asc')
+    owner_id_str = args.get('owner_id')
+    owner_id = int(owner_id_str) if owner_id_str and owner_id_str.isdigit() else None
+    search_term = args.get('search_term', '').strip()
+
+    if owner_id:
+        query = query.filter(Server.owner_id == owner_id)
+    if search_term:
+        query = query.filter(or_(Server.server_name.ilike(f'%{search_term}%'), Server.owner_username.ilike(f'%{search_term}%')))
+    
+    today = get_today()
+    if filter_status == 'normal': query = query.filter(Server.expiration_date >= today)
+    elif filter_status == 'expiring_soon': query = query.filter(Server.expiration_date.between(today, today + timedelta(days=7)))
+    elif filter_status == 'expired': query = query.filter(Server.expiration_date < today)
+    elif filter_status == 'permanent': query = query.filter(Server.expiration_date.is_(None))
+    
+    sort_column = getattr(Server, sort_by, Server.ptero_server_id)
+    if sort_by == 'expiration_date':
+        if sort_order == 'asc':
+             query = query.order_by(sort_column.asc().nulls_last())
+        else:
+             query = query.order_by(sort_column.desc().nulls_first())
+    else:
+        if sort_order == 'desc':
+            query = query.order_by(desc(sort_column))
+        else:
+            query = query.order_by(asc(sort_column))
+
+    return query.all()
+
+def get_processed_users_data(args):
+    users_data = get_ptero_data("users")
+    if users_data is None:
+        return None
+    all_users = [u['attributes'] for u in users_data]
+    search_term = args.get('search_term', '').strip()
+    filter_server_status = args.get('filter_server_status', 'all')
+    sort_by = args.get('sort_by', 'username')
+    sort_order = args.get('sort_order', 'asc')
+
+    if search_term:
+        search_term_lower = search_term.lower()
+        all_users = [u for u in all_users if search_term_lower in u.get('username', '').lower() or search_term_lower in u.get('email', '').lower() or search_term_lower in u.get('first_name', '').lower() or search_term_lower in u.get('last_name', '').lower()]
+    
+    server_counts = dict(db.session.query(Server.owner_id, func.count(Server.owner_id)).group_by(Server.owner_id).all())
+    for user in all_users:
+        user['server_count'] = server_counts.get(user['id'], 0)
+
+    if filter_server_status == 'has_servers': all_users = [u for u in all_users if u['server_count'] > 0]
+    elif filter_server_status == 'no_servers': all_users = [u for u in all_users if u['server_count'] == 0]
+    
+    reverse = sort_order == 'desc'
+    sort_key_map = {'username': lambda u: u.get('username', '').lower(), 'id': lambda u: u.get('id', 0), 'server_count': lambda u: u.get('server_count', 0)}
+    sort_key = sort_key_map.get(sort_by, sort_key_map['username'])
+    all_users.sort(key=sort_key, reverse=reverse)
+    return all_users
+
+@app.route('/')
+def dashboard():
+    _sync_database_with_pterodactyl()
+    
+    api_ok = config_manager.get('PTERO_PANEL_URL') and config_manager.get('PTERO_API_KEY')
+    if not api_ok:
+        flash("Pterodactyl API 未配置，无法加载仪表盘数据。", "error")
+        return render_template('dashboard.html', page_title="仪表盘", dashboard_data=None)
+
+    total_users = len(get_ptero_data("users") or [])
+    local_servers_list = Server.query.all()
+    total_servers = len(local_servers_list)
+    
+    status_counts = {'normal': 0, 'expiring_soon': 0, 'expired': 0, 'suspended': 0, 'permanent': 0}
+    today = get_today()
+    for s in local_servers_list:
+        # 检查 1: 服务器是否被冻结？这是一个独立的状态。
+        if s.status == '已冻结':
+            status_counts['suspended'] += 1
+
+        # 检查 2: 服务器的到期状态是什么？
+        # 这个检查不应该被“是否冻结”所影响，所以不使用 elif。
+        if s.expiration_date is None:
+            status_counts['permanent'] += 1
+        else:
+            days_left = (s.expiration_date - today).days
+            if days_left < 0:
+                status_counts['expired'] += 1
+            elif days_left <= 7:
+                status_counts['expiring_soon'] += 1
+            else:
+                status_counts['normal'] += 1
+            
+    normal_servers_count = status_counts['normal'] + status_counts['expiring_soon'] + status_counts['permanent']
+    dashboard_data = {
+        'core_metrics': { 'total_users': total_users, 'total_servers': total_servers, 'normal_servers_count': normal_servers_count, },
+        'status_distribution': { 'labels': ['正常', '即将到期', '已到期', '已冻结', '永久'], 'counts': [status_counts['normal'], status_counts['expiring_soon'], status_counts['expired'], status_counts['suspended'], status_counts['permanent']], }
+    }
+    return render_template('dashboard.html', page_title="仪表盘", dashboard_data=dashboard_data)
+
+@app.route('/servers')
+def servers_list():
+    _sync_database_with_pterodactyl()
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    all_servers = get_processed_servers_data(request.args)
+    
+    pagination = Pagination(page, per_page, len(all_servers), all_servers[(page-1)*per_page:page*per_page])
+    context = {
+        'page_title': "服务器列表", 
+        'servers': pagination.items, 
+        'today': get_today(), 
+        'timedelta': timedelta, 
+        'PANEL_URL': config_manager.get('PTERO_PANEL_URL', '').rstrip('/')
+    }
+    context.update(request.args.to_dict())
+    return render_template('dashboard.html', **context)
+
+@app.route('/users')
+def users_list():
+    _sync_database_with_pterodactyl()
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    
+    all_users = get_processed_users_data(request.args)
+    if all_users is None:
+        flash("无法从 Pterodactyl API 获取用户列表。", "error")
+        return render_template('dashboard.html', page_title="用户列表", users=[], **request.args.to_dict())
+        
+    pagination = Pagination(page, per_page, len(all_users), all_users[(page-1)*per_page:page*per_page])
+    return render_template('dashboard.html', page_title="用户列表", users=pagination.items, **request.args.to_dict())
+
+@app.route('/api/load_servers')
+def api_load_servers():
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    all_servers = get_processed_servers_data(request.args)
+    pagination = Pagination(page, per_page, len(all_servers), all_servers[(page-1)*per_page:page*per_page])
+    rendered_html = render_template('_server_rows.html', 
+                                    servers=pagination.items, 
+                                    today=get_today(), 
+                                    timedelta=timedelta,
+                                    PANEL_URL=config_manager.get('PTERO_PANEL_URL', '').rstrip('/'),
+                                    request=request)
+    return jsonify({"html": rendered_html, "has_more": pagination.has_next})
+
+@app.route('/api/load_users')
+def api_load_users():
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    all_users = get_processed_users_data(request.args)
+    if all_users is None:
+        return jsonify({"html": "", "has_more": False})
+    pagination = Pagination(page, per_page, len(all_users), all_users[(page-1)*per_page:page*per_page])
+    rendered_html = render_template('_user_rows.html', users=pagination.items, request=request)
+    return jsonify({"html": rendered_html, "has_more": pagination.has_next})
+
+@app.route('/set_expiry/<int:ptero_id>', methods=['POST'])
+def set_expiry(ptero_id):
+    server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
+    try: days = int(request.form['renew_days'])
+    except (ValueError, KeyError): flash("续期天数无效。", "error"); return redirect(url_for('servers_list', **request.args))
+    
+    today = get_today()
+    if server.expiration_date and server.expiration_date > today: new_date = server.expiration_date + timedelta(days=days)
+    else: new_date = today + timedelta(days=days)
+
+    if update_ptero_description(ptero_id, new_date):
+        server.expiration_date = new_date
+        db.session.commit()
+        flash(f"服务器 '{server.server_name}' 已成功续期至 {new_date.strftime('%Y-%m-%d')}，并已同步到面板。", "success")
+    else:
+        db.session.rollback()
+        flash(f"服务器 '{server.server_name}' 续期失败，因为无法更新面板描述。", "error")
+
+    return redirect(url_for('servers_list', **request.args))
+
+@app.route('/suspend/<int:ptero_id>', methods=['POST'])
+def suspend_server(ptero_id):
+    server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
+    action = 'unsuspend' if server.status == '已冻结' else 'suspend'
+    action_text = '解冻' if action == 'unsuspend' else '冻结'
+    api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers/{ptero_id}/{action}"
+    try:
+        res = requests.post(api_url, headers=get_api_headers(), timeout=20); res.raise_for_status()
+        server.status = None if action == 'unsuspend' else '已冻结'; db.session.commit()
+        flash(f"服务器 '{server.server_name}' 已成功{action_text}。", "success")
+    except requests.RequestException as e: handle_api_error(e, f"{action_text}服务器 '{server.server_name}'")
+    return redirect(url_for('servers_list', **request.args))
+
+@app.route('/delete/<int:ptero_id>', methods=['POST'])
+def delete_server(ptero_id):
+    server = Server.query.filter_by(ptero_server_id=ptero_id).first()
+    server_name = server.server_name if server else f"ID {ptero_id}"
+    api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers/{ptero_id}"
+    try:
+        res = requests.delete(api_url, headers=get_api_headers(), timeout=20)
+        if res.status_code not in [204, 404]: res.raise_for_status()
+        if server: db.session.delete(server); db.session.commit()
+        flash(f"服务器 '{server_name}' 已成功删除。", "success")
+    except requests.RequestException as e: handle_api_error(e, f"删除服务器 '{server_name}'")
+    return redirect(url_for('servers_list', **request.args))
+
+@app.route('/batch_process', methods=['POST'])
+def batch_process():
+    action = request.form.get('action'); server_ids_str = request.form.getlist('server_ids'); server_ids = [int(sid) for sid in server_ids_str]; redirect_params = get_redirect_params(request.form); redirect_url = url_for('servers_list', **redirect_params)
+    if not action or not server_ids: flash("未选择任何操作或服务器。", "error"); return redirect(redirect_url)
+    panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+    if not panel_url: flash("Pterodactyl 面板地址未配置。", "error"); return redirect(redirect_url)
+    success_count, error_count = 0, 0; headers = get_api_headers()
+    
+    if action in ['suspend', 'unsuspend']:
+        action_text = '冻结' if action == 'suspend' else '解冻'
+        for server_id in server_ids:
+            try:
+                res = requests.post(f"{panel_url}/api/application/servers/{server_id}/{action}", headers=headers, timeout=20); res.raise_for_status()
+                server = Server.query.filter_by(ptero_server_id=server_id).first()
+                if server: server.status = '已冻结' if action == 'suspend' else None
+                success_count += 1
+            except requests.RequestException: error_count += 1
+        db.session.commit(); flash(f"批量{action_text}操作完成：成功 {success_count}，失败 {error_count}。", "info")
+
+    elif action == 'renew':
+        renew_days = request.form.get('renew_days', type=int)
+        if not renew_days or renew_days <= 0: flash("请输入有效的续期天数。", "error"); return redirect(redirect_url)
+        servers_to_renew = Server.query.filter(Server.ptero_server_id.in_(server_ids)).all()
+        today = get_today()
+        for server in servers_to_renew:
+            if server.expiration_date and server.expiration_date > today: new_date = server.expiration_date + timedelta(days=renew_days)
+            else: new_date = today + timedelta(days=renew_days)
+            
+            if update_ptero_description(server.ptero_server_id, new_date):
+                server.expiration_date = new_date
+                success_count +=1
+            else:
+                error_count += 1
+        
+        if success_count > 0: db.session.commit()
+        else: db.session.rollback()
+        flash(f"批量续期操作完成：成功 {success_count}，失败 {error_count}。", "info")
+
+    elif action == 'delete':
+        for server_id in server_ids:
+            try:
+                res = requests.delete(f"{panel_url}/api/application/servers/{server_id}", headers=headers, timeout=20)
+                if res.status_code not in [204, 404]: res.raise_for_status()
+                server = Server.query.filter_by(ptero_server_id=server_id).first()
+                if server: db.session.delete(server)
+                success_count += 1
+            except requests.RequestException: error_count += 1
+        if success_count > 0: db.session.commit()
+        flash(f"批量删除操作完成：成功 {success_count}，失败 {error_count}。", "info")
+    
+    elif action == 'email':
+        template_data = load_email_template(); servers = db.session.query(Server).filter(Server.ptero_server_id.in_(server_ids)).all(); all_users_data = get_ptero_data("users")
+        if not all_users_data: flash("无法从API获取用户列表以发送邮件。", "error"); return redirect(redirect_url)
+        users_map = {u['attributes']['id']: u['attributes'] for u in all_users_data}
+        for server in servers:
+            user = users_map.get(server.owner_id)
+            if not user or not user.get('email'): error_count += 1; continue
+            context = {'{{panel_name}}': template_data.get('panel_name'), '{{username}}': user.get('username'), '{{email}}': user.get('email'), '{{server_name}}': server.server_name, '{{server_id}}': server.ptero_server_id, '{{expiration_date}}': server.expiration_date.strftime('%Y-%m-%d') if server.expiration_date else '永久'}
+            sent, _ = send_email(user['email'], template_data.get('subject'), template_data.get('body'), context)
+            if sent: success_count += 1
+            else: error_count += 1
+            time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+        flash(f"邮件任务完成：成功 {success_count} 封，失败 {error_count} 封。", "info")
+
+    return redirect(redirect_url)
+
+@app.route('/batch_process_users', methods=['POST'])
+def batch_process_users():
+    action = request.form.get('action'); user_ids = [int(uid) for uid in request.form.getlist('user_ids')]; redirect_params = get_redirect_params(request.form); redirect_url = url_for('users_list', **redirect_params)
+    if not action or not user_ids: flash("未选择任何操作或用户。", "error"); return redirect(redirect_url)
+    panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+    if not panel_url: flash("Pterodactyl 面板地址未配置。", "error"); return redirect(redirect_url)
+    success_count, error_count = 0, 0; headers = get_api_headers()
+    if action == 'delete':
+        for user_id in user_ids:
+            try:
+                res = requests.delete(f"{panel_url}/api/application/users/{user_id}", headers=headers, timeout=20)
+                if res.status_code not in [204, 404]: res.raise_for_status()
+                Server.query.filter_by(owner_id=user_id).delete(); success_count += 1
+            except requests.RequestException as e: handle_api_error(e, f"删除用户ID {user_id}"); error_count += 1
+        db.session.commit(); flash(f"批量删除用户操作完成：成功 {success_count}，失败 {error_count}。", "info")
+    elif action == 'email':
+        template_data = load_email_template(); all_users_data = get_ptero_data("users")
+        if not all_users_data: flash("无法从API获取用户列表以发送邮件。", "error"); return redirect(redirect_url)
+        selected_user_ids = set(user_ids); users_to_email = [u for u in all_users_data if u.get('attributes', {}).get('id') in selected_user_ids]
+        if not users_to_email: flash("在获取到的用户列表中未找到任何选定的用户。", "warning"); return redirect(redirect_url)
+        for user_data in users_to_email:
+            user = user_data['attributes']
+            if not user.get('email'): error_count += 1; continue
+            context = {'{{panel_name}}': template_data.get('panel_name'), '{{username}}': user.get('username'), '{{email}}': user.get('email'), '{{server_name}}': '(不适用)', '{{server_id}}': '(不适用)', '{{expiration_date}}': '(不适用)'}
+            sent, _ = send_email(user['email'], template_data.get('subject'), template_data.get('body'), context)
+            if sent: success_count += 1
+            else: error_count += 1
+            time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+        flash(f"邮件任务完成：成功 {success_count} 封，失败 {error_count} 封。", "info")
+    return redirect(redirect_url)
+
+@app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
+def edit_user(user_id):
+    redirect_url = url_for('users_list', **request.args); panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+    if not panel_url: flash("Pterodactyl 面板地址未配置。", "error"); return redirect(redirect_url)
+    if request.method == 'POST':
+        payload = {"username": request.form['username'], "email": request.form['email'], "first_name": request.form['first_name'], "last_name": request.form['last_name']}
+        if request.form.get('password'): payload['password'] = request.form['password']
+        try:
+            res = requests.patch(f"{panel_url}/api/application/users/{user_id}", headers=get_api_headers(), json=payload, timeout=20); res.raise_for_status()
+            flash(f"用户 {payload['username']} 的信息已成功更新。", "success")
+            Server.query.filter_by(owner_id=user_id).update({'owner_username': payload['username']}); db.session.commit()
+        except requests.RequestException as e: handle_api_error(e, f"更新用户 {request.form['username']}")
+        return redirect(redirect_url)
+    user_data = get_ptero_single_item(f"users/{user_id}")
+    if not user_data: flash(f"无法获取 User ID: {user_id} 的信息。", "error"); return redirect(redirect_url)
+    return render_template('edit_user.html', user=user_data)
+
+@app.route('/create_server', methods=['GET', 'POST'])
+def create_server_page():
+    if request.method == 'POST':
+        try:
+            cfg = config_manager.config
+            user_id = int(request.form.get('user_id'))
+            server_name = request.form.get('server_name', '').strip()
+            egg_id = int(request.form.get('egg_id'))
+            docker_image = request.form.get('docker_image', cfg.get('DOCKER_IMAGE')).strip()
+            startup_command = request.form.get('startup_command', '').strip()
+            node_id = int(request.form.get('node_id'))
+            allocation_id = int(request.form.get('allocation_id'))
+            expiration_days = int(request.form.get('expiration_days'))
+            environment = {}
+            for key, value in request.form.items():
+                if key.startswith('environment['): environment[key[len('environment['):-1]] = value
+            cpu = int(request.form.get('cpu') or cfg.get('DEFAULT_CPU'))
+            memory = int(request.form.get('memory') or cfg.get('DEFAULT_MEMORY'))
+            disk = int(request.form.get('disk') or cfg.get('DEFAULT_DISK'))
+            databases = int(request.form.get('databases') or cfg.get('DEFAULT_DATABASES'))
+            backups = int(request.form.get('backups') or cfg.get('DEFAULT_BACKUPS'))
+            allocations = int(request.form.get('allocations') or cfg.get('DEFAULT_ALLOCATIONS'))
+            if not all([user_id, node_id, allocation_id, server_name, egg_id, startup_command]): raise ValueError("必填字段缺失")
+        except (ValueError, TypeError):
+            flash("所有必填字段均为必填项，且资源配置需为有效整数。", "error")
+            return redirect(url_for('create_server_page'))
+        flash(f"正在创建服务器 '{server_name}'...", "info")
+        if create_ptero_server(user_id, server_name, expiration_days, node_id, allocation_id, egg_id, docker_image, startup_command, environment, cpu, memory, disk, databases, backups, allocations):
+            flash(f"服务器 '{server_name}' 创建成功！", "success")
+            return redirect(url_for('servers_list'))
+        return redirect(url_for('create_server_page'))
+    all_users_data = get_ptero_data("users"); all_nodes_data = get_ptero_data("nodes"); all_nests_data = get_ptero_data("nests")
+    defaults = {k.replace('DEFAULT_', '').lower(): v for k, v in config_manager.config.items() if k.startswith('DEFAULT_')}; defaults.update({k: v for k, v in config_manager.config.items() if k in ['DOCKER_IMAGE']})
+    return render_template('dashboard.html', page_title="创建服务器", all_users=[u['attributes'] for u in all_users_data] if all_users_data else [], all_nodes=[n['attributes'] for n in all_nodes_data] if all_nodes_data else [], all_nests=[n['attributes'] for n in all_nests_data] if all_nests_data else [], defaults=defaults, **config_manager.config)
+
+@app.route('/settings', methods=['GET', 'POST'])
+def settings_page():
+    if request.method == 'POST':
+        # 1. 保存旧配置用于对比
+        old_url = config_manager.get('PTERO_PANEL_URL')
+        old_key = config_manager.get('PTERO_API_KEY')
+        
+        # 2. 准备要保存的新数据
+        settings_to_save = {}
+        form_data = request.form.to_dict()
+
+        for key, value in form_data.items():
+            settings_to_save[key] = value
+
+        settings_to_save['SMTP_USE_SSL'] = 'SMTP_USE_SSL' in form_data
+        
+        # 如果密码字段为空，则从待保存数据中移除，避免覆盖
+        if not form_data.get('PTERO_API_KEY'):
+            settings_to_save.pop('PTERO_API_KEY', None)
+        if not form_data.get('SMTP_PASSWORD'):
+            settings_to_save.pop('SMTP_PASSWORD', None)
+        if not form_data.get('ADMIN_PASSWORD'):
+            settings_to_save.pop('ADMIN_PASSWORD', None)
+
+        # 3. 保存到文件并重载当前 worker 的配置
+        config_manager.save_config(settings_to_save)
+        
+        # 4. 获取新配置用于对比
+        new_url = config_manager.get('PTERO_PANEL_URL')
+        new_key = config_manager.get('PTERO_API_KEY')
+
+        # 5. 对比新旧配置，如果变化则清空数据库
+        if new_url != old_url or new_key != old_key:
+            try:
+                num_rows_deleted = db.session.query(Server).delete()
+                db.session.commit()
+                if num_rows_deleted > 0:
+                    flash(f"检测到面板URL或API Key已更改，已清除 {num_rows_deleted} 条本地服务器缓存数据以进行重新同步。", "info")
+                    app.logger.info(f"Pterodactyl API credentials changed. Cleared {num_rows_deleted} local server records.")
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"清除本地服务器数据时出错: {e}")
+
+        # 6. 发送提示消息并重定向
+        flash("系统设置已成功保存！", "success")
+        flash("重要提示：API、自动化或密码等关键设置的更改需要重启应用才能使所有进程生效。", "info")
+        return redirect(url_for('settings_page'))
+
+    # GET 请求逻辑
+    settings_display = config_manager.config.copy()
+    if settings_display.get('PTERO_API_KEY'):
+        key=settings_display['PTERO_API_KEY']
+        settings_display['PTERO_API_KEY'] = f"{key[:4]}...{key[-4:]}" if len(key)>8 else "********"
+    if settings_display.get('SMTP_PASSWORD'):
+        settings_display['SMTP_PASSWORD'] = '************'
+    if settings_display.get('ADMIN_PASSWORD'):
+        settings_display['ADMIN_PASSWORD'] = '************'
+    
+    all_nests_data = get_ptero_data("nests")
+    all_nodes_data = get_ptero_data("nodes")
+    all_nests = [n['attributes'] for n in all_nests_data] if all_nests_data else []
+    all_nodes = [n['attributes'] for n in all_nodes_data] if all_nodes_data else []
+    all_eggs = []
+    
+    current_nest_id_str = config_manager.get('DEFAULT_NEST_ID')
+    if current_nest_id_str:
+        try:
+            current_nest_id = int(current_nest_id_str)
+            all_eggs_data = get_ptero_data(f"nests/{current_nest_id}/eggs")
+            if all_eggs_data:
+                all_eggs = [e['attributes'] for e in all_eggs_data]
+        except (ValueError, TypeError):
+             app.logger.warning(f"Invalid DEFAULT_NEST_ID found in config: {current_nest_id_str}")
+        
+    return render_template('dashboard.html', page_title="系统设置", settings=settings_display, all_nests=all_nests, all_nodes=all_nodes, all_eggs=all_eggs)
+    
+@app.route('/automation', methods=['GET', 'POST'])
+def automation_page():
+    if request.method == 'POST':
+        automation_settings = {
+            'AUTOMATION_RUN_HOUR': request.form.get('AUTOMATION_RUN_HOUR'),
+            'AUTOMATION_RUN_MINUTE': request.form.get('AUTOMATION_RUN_MINUTE'),
+            'AUTOMATION_DELETE_DAYS': request.form.get('AUTOMATION_DELETE_DAYS'),
+            'AUTOMATION_EMAIL_RUN_HOUR': request.form.get('AUTOMATION_EMAIL_RUN_HOUR'),
+            'AUTOMATION_EMAIL_RUN_MINUTE': request.form.get('AUTOMATION_EMAIL_RUN_MINUTE'),
+            'AUTOMATION_SUSPEND_ENABLED': 'AUTOMATION_SUSPEND_ENABLED' in request.form,
+            'AUTOMATION_DELETE_ENABLED': 'AUTOMATION_DELETE_ENABLED' in request.form,
+            'AUTOMATION_EMAIL_ENABLED': 'AUTOMATION_EMAIL_ENABLED' in request.form
+        }
+        config_manager.save_config(automation_settings)
+        flash("自动化设置已保存。请重启应用以使新计划生效。", "success")
+        return redirect(url_for('automation_page'))
+    return render_template('dashboard.html', page_title="自动化设置", settings=config_manager.config)
+    
+@app.route('/email_template', methods=['GET', 'POST'])
+def email_template():
+    if request.method == 'POST':
+        if request.form.get('form_type') == 'bulk':
+            bulk_data = {'panel_name': request.form.get('panel_name'), 'subject': request.form.get('subject'), 'body': request.form.get('body')}
+            save_email_template(bulk_data)
+            flash("批量邮件模板已保存。", "success")
+        elif request.form.get('form_type') == 'reminder':
+            reminder_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
+            save_reminder_template(reminder_data)
+            flash("到期提醒模板已保存。", "success")
+        return redirect(url_for('email_template'))
+    return render_template('dashboard.html', page_title="邮件模板管理", 
+        template_data=load_email_template(), 
+        reminder_template_data=load_reminder_template())
+
+@app.route('/api/nodes/<int:node_id>/allocations')
+def api_get_node_allocations(node_id):
+    allocs = get_ptero_data(f"nodes/{node_id}/allocations")
+    unassigned_allocs = [a['attributes'] for a in allocs if a.get('attributes') and not a['attributes'].get('assigned')] if allocs else []
+    return jsonify({"allocations": unassigned_allocs})
+
+@app.route('/api/nests/<int:nest_id>/eggs')
+def api_get_nest_eggs(nest_id):
+    eggs_data = get_ptero_data(f"nests/{nest_id}/eggs")
+    return jsonify({"eggs": [e['attributes'] for e in eggs_data] if eggs_data else []})
+
+@app.route('/api/nests/<int:nest_id>/eggs/<int:egg_id>/variables')
+def api_get_nest_egg_variables(nest_id, egg_id):
+    egg_data_list = get_ptero_data(f"nests/{nest_id}/eggs/{egg_id}?include=variables")
+    if not egg_data_list: return jsonify({"error": "Egg not found or API error"}), 404
+    egg_data = egg_data_list[0]
+    variables = egg_data.get('attributes', {}).get('relationships', {}).get('variables', {}).get('data', [])
+    return jsonify({"variables": [v['attributes'] for v in variables]})
+
+def automated_suspend_task():
+    with app.app_context():
+        try:
+            today = get_today()
+            yesterday = today - timedelta(days=1)
+            app.logger.info(f"[自动化任务] 开始执行自动冻结任务 (目标日期: {yesterday})")
+            servers_to_suspend = Server.query.filter(
+                Server.expiration_date == yesterday,
+                or_(Server.status == None, Server.status != '已冻结')
+            ).all()
+            if not servers_to_suspend:
+                app.logger.info("[自动化任务] 没有找到昨天到期且需要冻结的服务器。")
+                return
+            app.logger.info(f"[自动化任务] 找到 {len(servers_to_suspend)} 台服务器需要冻结。")
+            success_count, error_count = 0, 0
+            panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+            headers = get_api_headers()
+            for server in servers_to_suspend:
+                try:
+                    res = requests.post(f"{panel_url}/api/application/servers/{server.ptero_server_id}/suspend", headers=headers, timeout=20)
+                    res.raise_for_status()
+                    server.status = '已冻结'
+                    db.session.commit()
+                    success_count += 1
+                    app.logger.info(f"[自动化任务] 成功冻结服务器 '{server.server_name}' (ID: {server.ptero_server_id})")
+                except requests.RequestException as e:
+                    error_count += 1
+                    db.session.rollback()
+                    app.logger.error(f"[自动化任务] 冻结服务器 '{server.server_name}' (ID: {server.ptero_server_id}) 时出错: {e}")
+            app.logger.info(f"[自动化任务] 自动冻结任务完成。成功: {success_count}, 失败: {error_count}。")
+        except Exception as e:
+            app.logger.error(f"[自动化任务] 自动冻结任务执行时发生意外错误: {e}", exc_info=True)
+
+
+def automated_delete_task():
+    with app.app_context():
+        try:
+            delete_days = config_manager.get('AUTOMATION_DELETE_DAYS', 14)
+            delete_threshold_date = get_today() - timedelta(days=delete_days)
+            app.logger.info(f"[自动化任务] 开始执行自动删除任务 (删除到期日早于或等于 {delete_threshold_date} 的服务器)")
+            servers_to_delete = Server.query.filter(Server.expiration_date <= delete_threshold_date).all()
+            if not servers_to_delete: 
+                app.logger.info("[自动化任务] 没有找到符合删除条件的服务器。")
+                return
+            app.logger.info(f"[自动化任务] 找到 {len(servers_to_delete)} 台服务器需要删除。")
+            success_count, error_count = 0, 0
+            panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+            headers = get_api_headers()
+            for server in servers_to_delete:
+                try:
+                    res = requests.delete(f"{panel_url}/api/application/servers/{server.ptero_server_id}", headers=headers, timeout=20)
+                    if res.status_code not in [204, 404]: res.raise_for_status()
+                    db.session.delete(server)
+                    db.session.commit()
+                    success_count += 1
+                    app.logger.info(f"[自动化任务] 成功删除服务器 '{server.server_name}' (ID: {server.ptero_server_id})")
+                except requests.RequestException as e:
+                    error_count += 1
+                    db.session.rollback()
+                    app.logger.error(f"[自动化任务] 删除服务器 '{server.server_name}' (ID: {server.ptero_server_id}) 时出错: {e}")
+            app.logger.info(f"[自动化任务] 自动删除任务完成。成功: {success_count}, 失败: {error_count}。")
+        except Exception as e:
+            app.logger.error(f"[自动化任务] 自动删除任务执行时发生意外错误: {e}", exc_info=True)
+
+def automated_email_task():
+    with app.app_context():
+        try:
+            tomorrow = get_today() + timedelta(days=1)
+            app.logger.info(f"[自动化任务] 开始执行邮件提醒任务 (目标到期日: {tomorrow})")
+            servers_to_notify = Server.query.filter(Server.expiration_date == tomorrow).all()
+            if not servers_to_notify: 
+                app.logger.info("[自动化任务] 没有找到明天到期的服务器需要提醒。")
+                return
+            owners_map = {}
+            for server in servers_to_notify:
+                if server.owner_id not in owners_map: owners_map[server.owner_id] = []
+                owners_map[server.owner_id].append(server)
+            app.logger.info(f"[自动化任务] 找到 {len(servers_to_notify)} 台服务器，涉及 {len(owners_map)} 位用户，需要发送提醒。")
+            all_users_data = get_ptero_data("users")
+            if not all_users_data: 
+                app.logger.error("[自动化任务] 无法从API获取用户列表，邮件提醒任务中止。")
+                return
+            users_email_map = {u['attributes']['id']: u['attributes']['email'] for u in all_users_data if u.get('attributes')}
+            reminder_template = load_reminder_template()
+            panel_name = load_email_template().get('panel_name', '我的面板')
+            success_count, error_count = 0, 0
+            for owner_id, owner_servers in owners_map.items():
+                recipient_email = users_email_map.get(owner_id)
+                if not recipient_email:
+                    app.logger.warning(f"[自动化任务] 找不到用户ID {owner_id} 的邮箱，跳过。")
+                    error_count += 1
+                    continue
+                server_list_str = "\n".join([f"- {s.server_name} (ID: {s.ptero_server_id})" for s in owner_servers])
+                context = {
+                    '{{panel_name}}': panel_name,
+                    '{{username}}': owner_servers[0].owner_username,
+                    '{{expiration_date}}': tomorrow.strftime('%Y-%m-%d'),
+                    '{{server_count}}': str(len(owner_servers)),
+                    '{{server_list}}': server_list_str
+                }
+                sent, _ = send_email(recipient_email, reminder_template['subject'], reminder_template['body'], context)
+                if sent: success_count += 1
+                else: error_count += 1
+                time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+            app.logger.info(f"[自动化任务] 邮件提醒任务完成。成功发送给 {success_count} 位用户，失败 {error_count} 位。")
+        except Exception as e:
+            app.logger.error(f"[自动化任务] 邮件提醒任务执行时发生意外错误: {e}", exc_info=True)
+
+def initialize_scheduler(app_instance):
+    """Initializes the database and scheduler."""
+    with app_instance.app_context():
+        db.create_all()
+        scheduler.init_app(app_instance)
+        
+        run_hour = config_manager.get('AUTOMATION_RUN_HOUR')
+        run_minute = config_manager.get('AUTOMATION_RUN_MINUTE')
+        email_run_hour = config_manager.get('AUTOMATION_EMAIL_RUN_HOUR')
+        email_run_minute = config_manager.get('AUTOMATION_EMAIL_RUN_MINUTE')
+
+        if config_manager.get('AUTOMATION_SUSPEND_ENABLED'):
+            scheduler.add_job(id='auto_suspend_task', func=automated_suspend_task, trigger='cron', hour=run_hour, minute=run_minute, replace_existing=True)
+            app.logger.info(f"已启用自动冻结任务，每日 {run_hour}:{run_minute:02d} ({LOCAL_TZ.zone}) 执行。")
+        if config_manager.get('AUTOMATION_DELETE_ENABLED'):
+            scheduler.add_job(id='auto_delete_task', func=automated_delete_task, trigger='cron', hour=run_hour, minute=run_minute, replace_existing=True)
+            app.logger.info(f"已启用自动删除任务，每日 {run_hour}:{run_minute:02d} ({LOCAL_TZ.zone}) 执行。")
+        if config_manager.get('AUTOMATION_EMAIL_ENABLED'):
+            scheduler.add_job(id='auto_email_task', func=automated_email_task, trigger='cron', hour=email_run_hour, minute=email_run_minute, replace_existing=True)
+            app.logger.info(f"已启用自动邮件提醒任务，每日 {email_run_hour}:{email_run_minute:02d} ({LOCAL_TZ.zone}) 执行。")
+            
+        if scheduler.get_jobs():
+            if not scheduler.running:
+                scheduler.start()
+                app.logger.info("APScheduler 已启动。")
+        else:
+            app.logger.info("未启用任何自动化任务，APScheduler 未启动。")
+
+# Initialize scheduler
+initialize_scheduler(app)
+
+if __name__ == '__main__':
+    instance_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance')
+    os.makedirs(instance_path, exist_ok=True)
+    app.run(host='0.0.0.0', port=5000)
