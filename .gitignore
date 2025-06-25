@@ -3,6 +3,7 @@
 settings.json
 email_template.json
 reminder_template.json
+create_user_template.json
 .env
 
 # Python 虚拟环境目录
