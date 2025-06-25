@@ -338,7 +338,7 @@ def create_ptero_user(email, username):
     panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
     api_url = f"{panel_url}/api/application/users"
     headers = get_api_headers()
-    password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12)) # 密码加长以增加安全性
+    password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12))
 
     try:
         # 步骤 1: 创建用户，但不包含密码，以阻止 Pterodactyl 发送邮件
@@ -355,15 +355,21 @@ def create_ptero_user(email, username):
         user_id = new_user_data['attributes']['id']
 
         # 步骤 2: 立即更新用户，为其设置密码
+        # **BUG 修复**: 在 update_payload 中补全 API 要求的必填字段
         update_url = f"{api_url}/{user_id}"
-        update_payload = {"password": password}
+        update_payload = {
+            "email": email,
+            "username": username,
+            "first_name": "New",
+            "last_name": "User",
+            "password": password
+        }
         res_update = requests.patch(update_url, headers=headers, json=update_payload, timeout=20)
         res_update.raise_for_status()
 
         # 步骤 3: 发送我们自己的、完全可控的欢迎邮件
         template = load_create_user_template()
         body_raw = template.get('body', '')
-        # 确保模板中的 {{password}} 变量被替换
         final_body = body_raw.replace('{{username}}', username).replace('{{password}}', password)
 
         send_email(
