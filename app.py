@@ -337,28 +337,47 @@ def update_ptero_description(server_ptero_id, new_expiration_date=None):
 def create_ptero_user(email, username):
     panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
     api_url = f"{panel_url}/api/application/users"
-    password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8))
-    payload = {"email": email, "username": username, "first_name": "New", "last_name": "User", "password": password, "root_admin": False}
+    headers = get_api_headers()
+    password = ''.join(random.choices(string.ascii_lowercase + string.digits, k=12)) # 密码加长以增加安全性
+
     try:
-        res = requests.post(api_url, headers=get_api_headers(), json=payload, timeout=20)
-        res.raise_for_status()
-        new_user_data = res.json()
-        
+        # 步骤 1: 创建用户，但不包含密码，以阻止 Pterodactyl 发送邮件
+        create_payload = {
+            "email": email, 
+            "username": username, 
+            "first_name": "New", 
+            "last_name": "User",
+            "root_admin": False
+        }
+        res_create = requests.post(api_url, headers=headers, json=create_payload, timeout=20)
+        res_create.raise_for_status()
+        new_user_data = res_create.json()
+        user_id = new_user_data['attributes']['id']
+
+        # 步骤 2: 立即更新用户，为其设置密码
+        update_url = f"{api_url}/{user_id}"
+        update_payload = {"password": password}
+        res_update = requests.patch(update_url, headers=headers, json=update_payload, timeout=20)
+        res_update.raise_for_status()
+
+        # 步骤 3: 发送我们自己的、完全可控的欢迎邮件
         template = load_create_user_template()
         body_raw = template.get('body', '')
-        context = {'{{username}}': username, '{{password}}': password}
-        for key, value in context.items(): body_raw = body_raw.replace(key, str(value))
-        
+        # 确保模板中的 {{password}} 变量被替换
+        final_body = body_raw.replace('{{username}}', username).replace('{{password}}', password)
+
         send_email(
             recipient_email=email,
             subject=template.get('subject'),
-            main_content_raw=body_raw,
+            main_content_raw=final_body,
             greeting=f"您好, {username}!",
             action_text="点此登录您的账户",
             action_url=panel_url
         )
+        
         flash(f"用户 '{username}' 创建成功！初始密码已通过邮件发送至 {email}。", "success")
         return new_user_data['attributes']
+
     except requests.RequestException as e:
         handle_api_error(e, f"创建用户 '{username}'")
         return None
