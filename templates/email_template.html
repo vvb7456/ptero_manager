@@ -1,10 +1,10 @@
-<!-- templates/email_template.html (升级为模板管理页面) -->
+<!-- templates/email_template.html (v1.1.3: 更新描述以适应HTML邮件模板) -->
 
 <!-- 批量邮件模板 -->
 <article>
     <hgroup>
         <h2>批量邮件模板</h2>
-        <p>在这里编辑的内容将作为在 **服务器列表** 或 **用户列表** 页面进行 **批量发送邮件** 操作时的模板。</p>
+        <p>在此处编辑邮件的 **核心正文内容**。系统会自动将其套入美观的HTML邮件模板中发送。</p>
     </hgroup>
     <p>您可以使用以下变量：<br>
         {% raw %}
@@ -18,13 +18,13 @@
     </p>
     <form method="post">
         <input type="hidden" name="form_type" value="bulk">
-        <label for="panel_name">面板名称 (用于邮件)</label>
+        <label for="panel_name">面板名称 (用于所有邮件的抬头和落款)</label>
         <input type="text" id="panel_name" name="panel_name" value="{{ template_data.panel_name or '我的面板' }}">
 
         <label for="subject">邮件主题</label>
         <input type="text" id="subject" name="subject" value="{{ template_data.subject }}" required>
 
-        <label for="body">邮件正文</label>
+        <label for="body">邮件正文 (支持换行)</label>
         <textarea id="body" name="body" rows="10" required>{{ template_data.body }}</textarea>
 
         <button type="submit">保存批量模板</button>
@@ -37,7 +37,7 @@
 <article>
     <hgroup>
         <h2>自动到期提醒模板</h2>
-        <p>在这里编辑的内容将作为 **自动化任务** 为即将到期的用户发送提醒邮件时的模板。</p>
+        <p>在此处编辑自动化任务发送的 **核心正文内容**。系统将自动套用HTML模板。</p>
     </hgroup>
     <p>您可以使用以下变量：<br>
         {% raw %}
@@ -53,9 +53,37 @@
         <label for="reminder_subject">提醒邮件主题</label>
         <input type="text" id="reminder_subject" name="subject" value="{{ reminder_template_data.subject }}" required>
 
-        <label for="reminder_body">提醒邮件正文</label>
+        <label for="reminder_body">提醒邮件正文 (支持换行)</label>
         <textarea id="reminder_body" name="body" rows="10" required>{{ reminder_template_data.body }}</textarea>
 
         <button type="submit">保存提醒模板</button>
+    </form>
+</article>
+
+<hr>
+
+<!-- 新用户创建通知模板 -->
+<article>
+    <hgroup>
+        <h2>新用户创建通知模板</h2>
+        <p>在此处编辑新用户欢迎邮件的 **核心正文内容**。系统将自动套用HTML模板。</p>
+    </hgroup>
+    <p>您可以使用以下变量：<br>
+        {% raw %}
+        <code>{{username}}</code> - 新用户的用户名。<br>
+        <code>{{password}}</code> - 为用户生成的随机初始密码。<br>
+        <code>{{panel_url}}</code> - 面板的登录地址。<br>
+        {% endraw %}
+    </p>
+    <form method="post">
+        <input type="hidden" name="form_type" value="create_user">
+        
+        <label for="create_user_subject">邮件主题</label>
+        <input type="text" id="create_user_subject" name="subject" value="{{ create_user_template_data.subject }}" required>
+
+        <label for="create_user_body">邮件正文 (支持换行)</label>
+        <textarea id="create_user_body" name="body" rows="10" required>{{ create_user_template_data.body }}</textarea>
+
+        <button type="submit">保存新用户模板</button>
     </form>
 </article>

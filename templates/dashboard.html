@@ -1,4 +1,4 @@
-<!-- templates/dashboard.html (v17: 修复创建服务器JS逻辑) -->
+<!-- templates/dashboard.html (v1.1.0: 修复新用户跳转后服务器名未自动填充的问题) -->
 {% extends "layout.html" %}
 
 {% block page_content %}
@@ -11,6 +11,8 @@
             {% include '_server_list.html' %}
         {% elif request.endpoint == 'users_list' %}
             {% include 'users.html' %}
+        {% elif request.endpoint == 'create_user' %}
+            {% include '_create_user.html' %}
         {% elif request.endpoint == 'create_server_page' %}
             {% include '_create_server.html' %}
         {% elif request.endpoint == 'email_template' %}
@@ -151,23 +153,41 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ---- v17: 创建服务器页面 JS (修复启动指令逻辑) ----
+    // ---- 创建服务器页面 JS ----
     const createServerForm = document.getElementById('create-server-form');
     if (createServerForm) {
-        $('#user_id').select2({
+        const userSelect = $('#user_id'); 
+        const serverNameInput = document.getElementById('server_name');
+
+        // **BUG修复**: 将填充名称的逻辑封装成一个可重用函数
+        function populateServerNameFromSelection() {
+            const selectedData = userSelect.select2('data')[0];
+            if (selectedData && selectedData.text) {
+                const username = selectedData.text.split(' (')[0];
+                // 仅当服务器名称输入框为空时才自动填充
+                if (!serverNameInput.value) {
+                    serverNameInput.value = `ST-${username}`;
+                }
+            }
+        }
+
+        // 当用户手动选择时，调用该函数
+        userSelect.on('select2:select', populateServerNameFromSelection);
+        
+        // 初始化 Select2 插件
+        userSelect.select2({
             placeholder: '输入用户名或邮箱搜索...',
             theme: 'bootstrap-5'
         });
 
-        const userSelect = $('#user_id');
-        const serverNameInput = document.getElementById('server_name');
-        userSelect.on('select2:select', function(e) {
-            const data = e.params.data;
-            const username = data.text.split(' (')[0];
-            if (!serverNameInput.value) {
-                serverNameInput.value = `ST-${username}`;
-            }
-        });
+        // **BUG修复**: 检查是否有从“创建用户”页面传递过来的新用户ID
+        const newUserId = "{{ new_user_id or '' }}";
+        if (newUserId) {
+            // 用代码自动选中该用户
+            userSelect.val(newUserId).trigger('change');
+            // 自动选中后，手动调用一次填充名称的函数，以修复bug
+            populateServerNameFromSelection();
+        }
 
         const nestSelect = document.getElementById('nest_id');
         const eggSelect = document.getElementById('egg_id');

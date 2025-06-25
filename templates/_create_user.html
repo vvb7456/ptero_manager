@@ -1,0 +1,49 @@
+<!-- templates/_create_user.html -->
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="{{ url_for('users_list') }}">用户列表</a></li>
+    <li>创建新用户</li>
+  </ul>
+</nav>
+
+<article>
+    <hgroup>
+        <h2>创建新用户</h2>
+        <p>系统将为新用户生成一个随机密码，并通过邮件发送给他。请确保 SMTP 配置正确。</p>
+    </hgroup>
+
+    <form method="post" id="create-user-form">
+        <label for="email">
+            用户邮箱
+            <input type="email" id="email" name="email" placeholder="user@example.com" required>
+        </label>
+        
+        <label for="username">
+            用户名
+            <input type="text" id="username" name="username" placeholder="根据邮箱自动填充" required>
+            <small>默认使用邮箱的 @ 前缀，可手动修改。</small>
+        </label>
+
+        <div class="grid">
+            <button type="submit" name="submit_action" value="create">创建用户</button>
+            <button type="submit" name="submit_action" value="create_and_server" class="contrast">创建用户并开通服务器</button>
+        </div>
+    </form>
+</article>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const emailInput = document.getElementById('email');
+    const usernameInput = document.getElementById('username');
+
+    if(emailInput && usernameInput) {
+        emailInput.addEventListener('input', function() {
+            const emailValue = this.value;
+            const atIndex = emailValue.indexOf('@');
+            if (atIndex > 0) {
+                usernameInput.value = emailValue.substring(0, atIndex);
+            }
+        });
+    }
+});
+</script>

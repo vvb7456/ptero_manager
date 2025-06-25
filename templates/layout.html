@@ -115,8 +115,7 @@
                 <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; justify-content: center;">
                     <a href="{{ url_for('dashboard') }}" role="button" class="{{ 'contrast' if request.endpoint == 'dashboard' else 'secondary' }}">仪表盘</a>
                     <a href="{{ url_for('servers_list') }}" role="button" class="{{ 'contrast' if request.endpoint == 'servers_list' else 'secondary' }}">服务器列表</a>
-                    <a href="{{ url_for('users_list') }}" role="button" class="{{ 'contrast' if request.endpoint == 'users_list' else 'secondary' }}">用户列表</a>
-                    <a href="{{ url_for('create_server_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'create_server_page' else 'secondary' }}">创建服务器</a>
+                    <a href="{{ url_for('users_list') }}" role="button" class="{{ 'contrast' if request.endpoint in ['users_list', 'create_user'] else 'secondary' }}">用户列表</a>
                     <a href="{{ url_for('email_template') }}" role="button" class="{{ 'contrast' if request.endpoint == 'email_template' else 'secondary' }}">邮件模板</a>
                     <a href="{{ url_for('automation_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'automation_page' else 'secondary' }}">自动化</a>
                     <a href="{{ url_for('settings_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'settings_page' else 'secondary' }}">系统设置</a>
@@ -142,7 +141,7 @@
     </main>
 
     <footer class="container" style="text-align: center; padding: 2rem 0; margin-top: auto; color: var(--pico-muted-color);">
-        <small>艾萝工坊 © 2015 - 2025</small>
+        <small>艾萝工坊 © 2015 - {{ current_year }}</small>
     </footer>
     
     <script src="https://cdn.jsdelivr.net/npm/jquery@3.5.1/dist/jquery.slim.min.js"></script>
