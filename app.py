@@ -1036,17 +1036,27 @@ def automated_email_task():
                 if not (recipient_email := users_email_map.get(owner_id)): continue
                 
                 server_list_str = "\n".join([f"- {s.server_name} (ID: {s.ptero_server_id})" for s in owner_servers])
+                
+                # 获取原始的主题和正文模板
+                subject_raw = reminder_template.get('subject', '【重要】您的服务器即将到期')
                 body_raw = reminder_template.get('body', '')
+
                 context_vars = {
-                    '{{username}}': owner_servers[0].owner_username, '{{expiration_date}}': tomorrow.strftime('%Y-%m-%d'),
-                    '{{server_count}}': str(len(owner_servers)), '{{server_list}}': server_list_str,
+                    '{{username}}': owner_servers[0].owner_username, 
+                    '{{expiration_date}}': tomorrow.strftime('%Y-%m-%d'),
+                    '{{server_count}}': str(len(owner_servers)), 
+                    '{{server_list}}': server_list_str,
                     '{{panel_name}}': load_email_template().get('panel_name', 'Pterodactyl')
                 }
-                for key, value in context_vars.items(): body_raw = body_raw.replace(key, str(value))
+
+                # 同时替换主题和正文中的变量
+                for key, value in context_vars.items():
+                    subject_raw = subject_raw.replace(key, str(value))
+                    body_raw = body_raw.replace(key, str(value))
                 
                 send_email(
                     recipient_email=recipient_email,
-                    subject=reminder_template.get('subject'),
+                    subject=subject_raw, # 使用已处理的主题
                     main_content_raw=body_raw,
                     greeting=f"您好, {owner_servers[0].owner_username}!",
                     action_text="登录面板处理",
