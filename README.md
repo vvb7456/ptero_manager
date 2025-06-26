@@ -54,7 +54,8 @@ git clone https://github.com/vvb7456/ptero_manager.git
 ```
 
 #### 第 2 步：创建并激活 Python 虚拟环境
-一个独立、干净的虚拟环境是稳定运行的保障。```bash
+一个独立、干净的虚拟环境是稳定运行的保障。
+```bash
 cd /opt/ptero_manager
 python3 -m venv venv
 source venv/bin/activate
