@@ -98,11 +98,6 @@ class ConfigManager:
         except (FileNotFoundError, json.JSONDecodeError):
             pass
 
-        sender_emails_str = self.config.get('SENDER_EMAIL', '')
-        if isinstance(sender_emails_str, str) and sender_emails_str:
-            self.config['SENDER_EMAIL_LIST'] = [email.strip() for email in sender_emails_str.split(',') if email.strip()]
-        else:
-            self.config['SENDER_EMAIL_LIST'] = []
 
     def save_config(self, new_settings):
         try:
@@ -122,7 +117,6 @@ class ConfigManager:
         return self.config.get(key, default)
 
 config_manager = ConfigManager()
-email_sender_index = 0
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = config_manager.get('SECRET_KEY')
@@ -410,26 +404,15 @@ def save_create_user_template(data):
     with open(CREATE_USER_TEMPLATE_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
 
 def send_email(recipient_email, subject, main_content_raw, greeting, action_text=None, action_url=None):
-    global email_sender_index
     cfg = config_manager.config
-    sender_email_list = cfg.get('SENDER_EMAIL_LIST', [])
+    sender_email = cfg.get('SENDER_EMAIL') # 不再需要邮件池
 
-    # 增强检查：确保所有必要配置都存在且邮箱池不为空
-    if not all([cfg.get('SMTP_HOST'), cfg.get('SMTP_PORT'), cfg.get('SMTP_PASSWORD'), sender_email_list]):
-        error_msg = "SMTP配置不完整或发件人邮箱池为空，请检查系统设置。"
+    # 检查所有必要的 SMTP 配置
+    if not all([cfg.get('SMTP_HOST'), cfg.get('SMTP_PORT'), cfg.get('SMTP_PASSWORD'), sender_email]):
+        error_msg = "SMTP 配置不完整（主机、端口、密码、发件人地址），请检查系统设置。"
         app.logger.error(error_msg)
         return False, error_msg
 
-    # 在访问列表前再次确认列表长度，防止除零错误
-    num_senders = len(sender_email_list)
-    if num_senders == 0:
-        error_msg = "发件人邮箱池在运行时变为空，无法发送邮件。"
-        app.logger.error(error_msg)
-        return False, error_msg
-        
-    current_sender_email = sender_email_list[email_sender_index % num_senders]
-    email_sender_index += 1
-    
     panel_name = load_email_template().get('panel_name', 'Pterodactyl')
     panel_url = config_manager.get('PTERO_PANEL_URL')
     
@@ -445,7 +428,8 @@ def send_email(recipient_email, subject, main_content_raw, greeting, action_text
                                 action_url=action_url)
     
     msg = MIMEText(html_body, 'html', 'utf-8')
-    msg['From'] = formataddr((Header(panel_name, 'utf-8').encode(), current_sender_email))
+    # 现在发件人地址和登录用户名是同一个
+    msg['From'] = formataddr((Header(panel_name, 'utf-8').encode(), sender_email))
     msg['To'] = recipient_email
     msg['Subject'] = Header(subject, 'utf-8')
 
@@ -453,8 +437,9 @@ def send_email(recipient_email, subject, main_content_raw, greeting, action_text
         server_class = smtplib.SMTP_SSL if cfg['SMTP_USE_SSL'] else smtplib.SMTP
         with server_class(cfg['SMTP_HOST'], int(cfg['SMTP_PORT']), timeout=20) as server:
             if not cfg['SMTP_USE_SSL']: server.starttls()
-            server.login(current_sender_email, cfg['SMTP_PASSWORD'])
-            server.sendmail(current_sender_email, [recipient_email], msg.as_string())
+            # 使用唯一的发件人邮箱进行登录
+            server.login(sender_email, cfg['SMTP_PASSWORD'])
+            server.sendmail(sender_email, [recipient_email], msg.as_string())
         app.logger.info(f"邮件已成功发送至 {recipient_email}")
         return True, "发送成功"
     except Exception as e:

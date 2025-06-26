@@ -69,12 +69,11 @@
         SMTP 密码 / 授权码
         <input type="password" id="smtp_password" name="SMTP_PASSWORD" placeholder="留空则不修改" value="">
         <small>当前值: {{ settings.SMTP_PASSWORD }}</small>
-        <small style="color: var(--pico-primary-focus);"><strong>重要：</strong>此密码必须对下方地址池中的所有邮箱账户都有效。</small>
     </label>
     <label for="sender_email">
-        发件人邮箱地址池
-        <textarea id="sender_email" name="SENDER_EMAIL" rows="3">{{ settings.SENDER_EMAIL }}</textarea>
-        <small>用于规避速率限制的“发件人”地址轮询池。输入一个或多个邮箱地址，用逗号 (,) 分隔。系统将使用池中的地址进行SMTP登录认证。</small>
+        发件人邮箱地址
+        <input type="email" id="sender_email" name="SENDER_EMAIL" placeholder="user@example.com" value="{{ settings.SENDER_EMAIL or '' }}">
+        <small>用于发送邮件的地址。此地址通常需要与您的 SMTP 登录用户名保持一致，具体取决于您的邮件服务商要求。</small>
     </label>
     <div class="grid">
         <label for="email_send_delay">
