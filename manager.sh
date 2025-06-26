@@ -50,7 +50,7 @@ fi
 start() {
     # 检查PID文件是否存在，如果存在则表示可能已在运行
     if [ -f "$PID_FILE" ]; then
-        echo "PID 文件 $PID_FILE 已存在。请先停止现有进程 (./start.sh stop) 或手动删除该文件。"
+        echo "PID 文件 $PID_FILE 已存在。请先停止现有进程 (./manager.sh stop) 或手动删除该文件。"
         exit 1
     fi
 
@@ -59,7 +59,7 @@ start() {
     # 切换到应用目录
     cd "$APP_DIR" || exit
 
-    # 启动 Gunicorn
+    # 启动 Gunicorn (已加入 --preload 参数)
     gunicorn ${APP_MODULE} \
       --workers ${WORKERS} \
       --worker-class ${WORKER_CLASS} \
@@ -69,6 +69,7 @@ start() {
       --access-logfile "$LOG_DIR/access.log" \
       --error-logfile "$LOG_DIR/error.log" \
       --log-level "info" \
+      --preload \
       --daemon
 
     # --daemon 参数让 Gunicorn 在后台运行
