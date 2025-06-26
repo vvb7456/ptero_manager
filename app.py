@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 from datetime import date, timedelta, datetime
 from urllib.parse import urlencode
 from flask_apscheduler import APScheduler
+from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -41,7 +42,6 @@ class ConfigManager:
         load_dotenv()
         self.config = {
             'SECRET_KEY': os.getenv('SECRET_KEY', 'a_default_secret_key_for_dev'),
-            'ADMIN_PASSWORD': os.getenv('ADMIN_PASSWORD', 'changeme'), # 添加默认密码
             'PTERO_PANEL_URL': os.getenv('PTERO_PANEL_URL', ''),
             'PTERO_API_KEY': os.getenv('PTERO_API_KEY', ''),
             'DEFAULT_NEST_ID': int(os.getenv('DEFAULT_NEST_ID', 1)),
@@ -133,27 +133,35 @@ CREATE_USER_TEMPLATE_FILE = 'create_user_template.json'
 
 @app.before_request
 def check_auth():
-    if not session.get('logged_in') and request.endpoint not in ('login', 'static'):
+    # 现在我们检查 'admin_user_id' 是否在 session 中
+    if not session.get('admin_user_id') and request.endpoint not in ('login', 'static'):
         return redirect(url_for('login'))
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        password_attempt = request.form.get('password')
-        admin_password = config_manager.get('ADMIN_PASSWORD')
-        if password_attempt == admin_password:
-            session['logged_in'] = True
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        # 从数据库查找用户
+        user = AdminUser.query.filter_by(username=username).first()
+        
+        # 验证用户是否存在以及密码是否正确
+        if user and user.check_password(password):
+            session.clear()
+            session['admin_user_id'] = user.id
+            session.permanent = True # 让会话持久
             flash('登录成功！', 'success')
             next_url = request.args.get('next') or url_for('dashboard')
             return redirect(next_url)
         else:
-            flash('密码错误，请重试。', 'error')
+            flash('用户名或密码无效。', 'error')
             return redirect(url_for('login'))
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
-    session.pop('logged_in', None)
+    session.pop('admin_user_id', None)
     flash('您已成功退出登录。', 'info')
     return redirect(url_for('login'))
 
@@ -178,6 +186,20 @@ class Server(db.Model):
     owner_username=db.Column(db.String(100),nullable=True)
     status=db.Column(db.String(50),nullable=True)
     def __repr__(self): return f'<Server {self.server_name}>'
+
+class AdminUser(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    def __repr__(self):
+        return f'<AdminUser {self.username}>'
 
 class Pagination:
     def __init__(self, page, per_page, total_count, items):
@@ -910,7 +932,6 @@ def settings_page():
         settings_to_save['SMTP_USE_SSL'] = 'SMTP_USE_SSL' in form_data
         if not form_data.get('PTERO_API_KEY'): settings_to_save.pop('PTERO_API_KEY', None)
         if not form_data.get('SMTP_PASSWORD'): settings_to_save.pop('SMTP_PASSWORD', None)
-        if not form_data.get('ADMIN_PASSWORD'): settings_to_save.pop('ADMIN_PASSWORD', None)
         config_manager.save_config(settings_to_save)
         new_url = config_manager.get('PTERO_PANEL_URL'); new_key = config_manager.get('PTERO_API_KEY')
         if new_url != old_url or new_key != old_key:
@@ -1076,6 +1097,47 @@ if __name__ != '__main__':
     app.logger.handlers = gunicorn_logger.handlers
     app.logger.setLevel(gunicorn_logger.level)
     app.logger.info('Gunicorn logger integration successful.')
+    
+@app.cli.command("create-admin")
+def create_admin():
+    """创建一个新的管理员用户。"""
+    import getpass
+    username = input("请输入新管理员的用户名: ")
+    if AdminUser.query.filter_by(username=username).first():
+        print(f"错误: 用户 '{username}' 已存在。")
+        return
+    
+    password = getpass.getpass("请输入新管理员的密码: ")
+    confirm_password = getpass.getpass("请再次输入密码进行确认: ")
+
+    if password != confirm_password:
+        print("错误: 两次输入的密码不匹配。")
+        return
+        
+    if not password:
+        print("错误: 密码不能为空。")
+        return
+
+    new_admin = AdminUser(username=username)
+    new_admin.set_password(password)
+    db.session.add(new_admin)
+    try:
+        db.session.commit()
+        print(f"管理员用户 '{username}' 已成功创建！")
+    except Exception as e:
+        db.session.rollback()
+        print(f"创建用户时发生错误: {e}")
+
+@app.cli.command("list-admins")
+def list_admins():
+    """列出所有管理员用户。"""
+    admins = AdminUser.query.all()
+    if not admins:
+        print("系统中没有管理员用户。")
+        return
+    print("管理员用户列表:")
+    for admin in admins:
+        print(f"- {admin.username}")
 
 if __name__ == '__main__':
     os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance'), exist_ok=True)

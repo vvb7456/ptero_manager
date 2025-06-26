@@ -15,20 +15,6 @@
         <input type="url" id="ui_banner_url" name="UI_BANNER_URL" placeholder="例如: https://example.com/logo.png" value="{{ settings.UI_BANNER_URL or '' }}">
         <small>输入一个公开可访问的图片链接。推荐使用透明背景的 PNG 图片，高度建议为 50-60 像素。</small>
     </label>
-
-    <hr>
-    
-    <!-- 安全设置 -->
-    <hgroup>
-        <h3>安全设置</h3>
-        <p>管理此面板的访问凭证。</p>
-    </hgroup>
-    <label for="admin_password">
-        管理员密码
-        <input type="password" id="admin_password" name="ADMIN_PASSWORD" placeholder="留空则不修改密码" value="">
-        <small>当前值: {{ settings.ADMIN_PASSWORD }}</small>
-        <small>用于登录此管理面板的唯一密码。</small>
-    </label>
     
     <hr>
 
