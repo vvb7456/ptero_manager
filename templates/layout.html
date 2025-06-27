@@ -1,4 +1,4 @@
-<!-- templates/layout.html (Logo尺寸修正版) -->
+<!-- templates/layout.html (最终响应式版) -->
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -96,6 +96,11 @@
         [data-theme="dark"] .select2-results__option--highlighted { background-color: var(--primary-focus); }
         
         #desktop-nav-links a[role="button"] { padding: 0.5rem 1rem; font-weight: 500; }
+        
+        .page-actions-bar {
+            display: flex; justify-content: space-between; align-items: flex-end;
+            flex-wrap: wrap; gap: 2rem; margin-bottom: 1rem;
+        }
 
         /* ---- 响应式布局 ---- */
         @media (max-width: 992px) {
@@ -104,46 +109,85 @@
                 display: flex;
                 justify-content: space-between;
             }
-            .header-center {
-                display: none;
-            }
-            .header-right > .secondary.outline {
-                display: none;
-            }
-            #mobile-menu-toggle {
-                display: block;
-            }
-            main.container {
-                padding-top: calc(var(--header-height-mobile) + 20px);
-            }
+            .header-center { display: none; }
+            .header-right > .secondary.outline { display: none; }
+            #mobile-menu-toggle { display: block; }
+            main.container { padding-top: calc(var(--header-height-mobile) + 20px); }
             
             #mobile-nav-menu {
-                display: none;
-                position: fixed;
+                display: none; position: fixed;
                 top: 0; left: 0; width: 100%; height: 100%;
                 background-color: rgba(0, 0, 0, 0.8);
-                z-index: 1000;
-                flex-direction: column;
-                justify-content: center;
-                align-items: center;
-                gap: 1.5rem;
+                z-index: 1000; flex-direction: column;
+                justify-content: center; align-items: center; gap: 1.5rem;
             }
-            
-            body.nav-open #mobile-nav-menu {
-                display: flex;
-            }
-            
+            body.nav-open #mobile-nav-menu { display: flex; }
             #mobile-nav-menu a[role="button"] {
-                font-size: 1.2rem;
-                padding: 1rem 2rem;
-                width: 80%;
-                max-width: 300px;
-                text-align: center;
+                font-size: 1.2rem; padding: 1rem 2rem;
+                width: 80%; max-width: 300px; text-align: center;
                 background-color: var(--card-background-color);
                 border: 1px solid var(--pico-muted-border-color);
                 color: var(--pico-color);
             }
             #mobile-nav-menu .mobile-logout { margin-top: 2rem; border-color: var(--pico-secondary); color: var(--pico-secondary); }
+        }
+
+        /* 响应式操作区和表格 (卡片化) */
+        @media (max-width: 768px) {
+            .page-actions-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 1.5rem;
+            }
+            .page-actions-bar > div { /* 重置子元素的对齐方式 */
+                align-items: stretch !important; 
+                flex-direction: column;
+            }
+
+            .table-scroll-container { max-height: none; overflow-y: visible; }
+            table[role="grid"] { border: 0; }
+            table[role="grid"] thead { display: none; }
+            table[role="grid"] tr {
+                display: block; margin-bottom: 1.5rem;
+                border: 1px solid var(--pico-muted-border-color);
+                border-radius: var(--pico-border-radius);
+                padding: 1rem;
+            }
+            table[role="grid"] td {
+                display: flex; justify-content: space-between; align-items: center;
+                text-align: right; padding: 0.5rem 0;
+                border-bottom: 1px solid var(--pico-muted-border-color);
+            }
+            table[role="grid"] tr td:last-child { border-bottom: 0; }
+            table[role="grid"] td::before {
+                content: attr(data-label);
+                text-align: left;
+                font-weight: bold;
+                margin-right: 1rem;
+            }
+            table[role="grid"] td[data-label="选择"] {
+                padding-bottom: 1rem;
+            }
+            table[role="grid"] td[data-label="操作"] > div {
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 0.75rem;
+                width: 100%;
+            }
+            table[role="grid"] td[data-label="操作"] form,
+            table[role="grid"] td[data-label="操作"] a {
+                width: 100%;
+            }
+            table[role="grid"] td[data-label="操作"] input,
+            table[role="grid"] td[data-label="操作"] button,
+            table[role="grid"] td[data-label="操作"] a[role="button"] {
+                width: 100%;
+                margin: 0 !important;
+            }
+            table[role="grid"] td[data-label="操作"] form {
+                display: flex;
+                gap: 0.5rem;
+            }
         }
     </style>
 </head>
@@ -152,8 +196,7 @@
         <div class="header-left">
             {% if UI_BANNER_URL %}
                 <a href="{{ url_for('dashboard') }}" style="line-height: 0;">
-                     <!-- FIX: 调整桌面端logo尺寸, 使用max-height -->
-                    <img src="{{ UI_BANNER_URL }}" alt="Banner" style="max-height: 55px; width: auto; display: block; object-fit: contain;">
+                     <img src="{{ UI_BANNER_URL }}" alt="Banner" style="max-height: 55px; width: auto; display: block; object-fit: contain;">
                 </a>
             {% else %}
                 <a href="{{ url_for('dashboard') }}" style="text-decoration: none;">

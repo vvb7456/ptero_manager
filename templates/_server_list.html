@@ -1,5 +1,5 @@
-<!-- templates/_server_list.html -->
-<div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 2rem; margin-bottom: 1rem;">
+<!-- templates/_server_list.html (响应式修改) -->
+<div class="page-actions-bar">
     <form id="batch-form" action="{{ url_for('batch_process') }}" method="post" style="margin: 0;">
         {% for key, value in request.args.to_dict().items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
         <div style="display: flex; align-items: flex-end; gap: 1rem;">

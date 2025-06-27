@@ -1,5 +1,5 @@
-<!-- templates/users.html (v1.1.2: 彻底修复创建按钮的垂直对齐问题) -->
-<div style="display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 2rem; margin-bottom: 1rem;">
+<!-- templates/users.html (响应式修改) -->
+<div class="page-actions-bar">
     <!-- 左侧批量操作 -->
     <form id="batch-users-form" action="{{ url_for('batch_process_users') }}" method="post" style="margin: 0;">
         {% for key, value in request.args.to_dict().items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
@@ -17,11 +17,9 @@
     </form>
 
     <!-- 右侧功能区 (创建按钮 + 筛选表单) -->
-    <!-- **BUG修复**: 将此处的 align-items 改回 'center'，与服务器列表页面保持一致 -->
     <div style="display: flex; align-items: center; flex-wrap: wrap; gap: 1rem;">
         <a href="{{ url_for('create_user') }}" role="button" class="contrast" style="margin-bottom: 0; white-space: nowrap;">创建新用户</a>
         
-        <!-- **BUG修复**: 将此处的 align-items 改回 'center' -->
         <form id="filter-users-form" action="{{ url_for('users_list') }}" method="get" style="display: flex; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin: 0;">
             <div>
                 <label for="search_term_user" style="margin-bottom: 0.25rem; font-size: 0.875rem;">搜索</label>
