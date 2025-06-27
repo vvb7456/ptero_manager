@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - 管理系统</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@1/css/pico.min.css">
+    <!-- 修复：将 CDN 链接替换为本地静态文件引用 -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/pico.min.css') }}">
     <style>
         body {
             display: flex;
