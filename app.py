@@ -70,6 +70,7 @@ class ConfigManager:
             'AUTOMATION_EMAIL_RUN_MINUTE': int(os.getenv('AUTOMATION_EMAIL_RUN_MINUTE', 0)),
             'UI_SYSTEM_NAME': os.getenv('UI_SYSTEM_NAME', 'Pterodactyl 管理面板'),
             'UI_BANNER_URL': os.getenv('UI_BANNER_URL', ''),
+            'UI_ICP_RECORD': os.getenv('UI_ICP_RECORD', '')
         }
         
         try:
@@ -173,6 +174,7 @@ def inject_ui_settings():
     return {
         'UI_SYSTEM_NAME': config_manager.get('UI_SYSTEM_NAME'),
         'UI_BANNER_URL': config_manager.get('UI_BANNER_URL'),
+        'UI_ICP_RECORD': config_manager.get('UI_ICP_RECORD'),
         'current_year': datetime.now(LOCAL_TZ).year
     }
 

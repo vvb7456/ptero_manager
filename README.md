@@ -53,48 +53,25 @@ cd /opt
 git clone https://github.com/vvb7456/ptero_manager.git
 ```
 
-#### 第 2 步：创建并激活 Python 虚拟环境
-一个独立、干净的虚拟环境是稳定运行的保障。
+#### 第 2 步：安装项目依赖
+在一个独立、干净的虚拟环境是稳定运行的保障。
 ```bash
 cd /opt/ptero_manager
 python3 -m venv venv
 source venv/bin/activate
-```
-成功激活后，您的命令行提示符前会显示 `(venv)`。
-
-#### 第 3 步：安装项目依赖
-```bash
 pip install -r requirements.txt
 ```
+安装完成后，您可以输入 `deactivate` 退出虚拟环境，后续的管理脚本会自动激活它。
 
-#### 第 4 步：初始化数据库
-系统需要一个数据库文件来存储管理员账号。此命令会自动创建所需的表。
-```bash
-flask shell
-```
-进入 `>>>` 提示符后，执行以下命令：
-```python
-from app import db
-db.create_all()
-exit()
-```
-
-#### 第 5 步：创建第一个管理员账号
-使用我们提供的命令行工具，安全地创建您的第一个后台管理员账号。
-```bash
-flask create-admin
-```
-根据终端提示，输入您要设置的**用户名**和**密码**。
-
-### 3. 核心配置 (`settings.json`)
-
-**部署中最关键的一步。** 在项目根目录 `/opt/ptero_manager/` 下，您必须**手动创建**一个名为 `settings.json` 的文件，并填入您的配置。
+#### 第 3 步：核心配置 (`settings.json`)
+**部署中最关键的一步。** 在项目根目录 `/opt/ptero_manager/` 下，您必须**手动创建**一个名为 `settings.json` 的文件，并填入您的配置。这是应用首次成功启动的必要条件。
 
 **`settings.json` 完整配置模板：**
 ```json
 {
     "UI_SYSTEM_NAME": "我的管理面板",
     "UI_BANNER_URL": "https://your-logo-url.com/logo.png",
+    "UI_ICP_RECORD": "京ICP备2021000000号-1",
     
     "PTERO_PANEL_URL": "https://panel.yourdomain.com",
     "PTERO_API_KEY": "ptla_xxxxxxxxxxxxxxxxxxxxxxxxxxxx",
@@ -131,13 +108,37 @@ flask create-admin
 -   `PTERO_*`: 您的 Pterodactyl 面板 URL 和 **Application API Key**。
 -   `SMTP_*`: **强烈推荐**使用专业的邮件推送服务（如阿里云邮件推送、SendGrid）的 SMTP 信息以保证送达率。
 -   `DEFAULT_*`: 用于在“创建服务器”页面预填表单的默认值。
--   `AUTOMATION_*`: 后台自动化任务的开关和执行时间（24小时制）。
+-   `AUTOMATION_*`: 后台自动化任务的开关和���行时间（24小时制）。
+-   `UI_ICP_RECORD`: (可选) ICP备案号，将显示在页脚。
+
+#### 第 4 步：启动服务并创建管理员
+现在，您可以直接使用 `manager.sh` 脚本来启动服务。首次启动会自动创建数据库文件。
+
+1.  **授予执行权限**:
+    ```bash
+    chmod +x manager.sh
+    ```
+2.  **启动服务**:
+    ```bash
+    ./manager.sh start
+    ```
+    服务成功启动后，您可以先将其停止以便创建管理员。
+    ```bash
+    ./manager.sh stop
+    ```
+3.  **创建第一个管理员账号**:
+    激活虚拟环境，然后使用 Flask 命令行工具创建管理员。
+    ```bash
+    source venv/bin/activate
+    flask create-admin
+    deactivate
+    ```
+    根据终端提示，输入您要设置的**用户名**和**密码**。
 
 ### 4. 服务运行与维护
 
-本项目自带一个 `manager.sh` 脚本，用于以后台模式启动 Gunicorn 生产服务器。
+本项目自带一个 `manager.sh` 脚本，用于以后台模式启动 Gunicorn 生产服务器。该脚本会自动处理 Python 虚拟环境的激活。
 
--   **首次使用需授权**: `chmod +x manager.sh`
 -   **启动服务**: `./manager.sh start`
 -   **停止服务**: `./manager.sh stop`
 -   **重启服务**: `./manager.sh restart`

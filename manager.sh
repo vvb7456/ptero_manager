@@ -12,6 +12,15 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Gunicorn 进程ID文件
 PID_FILE="$APP_DIR/$APP_NAME.pid"
 
+# 激活虚拟环境 (如果存在)
+VENV_ACTIVATE="$APP_DIR/venv/bin/activate"
+if [ -f "$VENV_ACTIVATE" ]; then
+    echo "正在激活虚拟环境..."
+    source "$VENV_ACTIVATE"
+else
+    echo "警告: 未找到虚拟环境 'venv'。将使用系统级的 Python 环境。"
+fi
+
 # 日志文件目录
 LOG_DIR="$APP_DIR/logs"
 

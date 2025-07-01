@@ -15,6 +15,11 @@
         <input type="url" id="ui_banner_url" name="UI_BANNER_URL" placeholder="例如: https://example.com/logo.png" value="{{ settings.UI_BANNER_URL or '' }}">
         <small>输入一个公开可访问的图片链接。推荐使用透明背景的 PNG 图片，高度建议为 50-60 像素。</small>
     </label>
+    <label for="ui_icp_record">
+        ICP 备案号
+        <input type="text" id="ui_icp_record" name="UI_ICP_RECORD" placeholder="例如: 京ICP备2021000000号-1" value="{{ settings.UI_ICP_RECORD or '' }}">
+        <small>网站的 ICP 备案号，将显示在页脚。留空则不显示。</small>
+    </label>
     
     <hr>
 
