@@ -1,4 +1,3 @@
-<!-- templates/dashboard.html (v1.1.0: 修复新用户跳转后服务器名未自动填充的问题) -->
 {% extends "layout.html" %}
 
 {% block page_content %}
@@ -30,7 +29,7 @@
 {{ super() }}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    // ---- v16: 无限滚动JS逻辑 ----
+    // ---- 无限滚动JS逻辑 ----
     const scrollContainer = document.querySelector('.table-scroll-container');
     
     if (scrollContainer) {

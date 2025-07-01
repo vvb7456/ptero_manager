@@ -582,7 +582,6 @@ def users_list():
     pagination = Pagination(page, per_page, len(all_users), all_users[(page-1)*per_page:page*per_page])
     return render_template('dashboard.html', page_title="用户列表", users=pagination.items, **request.args.to_dict())
 
-# ... (API routes for infinite scroll are unchanged)
 @app.route('/api/load_servers')
 def api_load_servers():
     page = request.args.get('page', 1, type=int)
@@ -616,7 +615,6 @@ def set_expiry(ptero_id):
         db.session.rollback(); flash(f"服务器 '{server.server_name}' 续期失败，无法更新面板。", "error")
     return redirect(url_for('servers_list', **request.args))
 
-# ... (suspend_server and delete_server are unchanged)
 @app.route('/suspend/<int:ptero_id>', methods=['POST'])
 def suspend_server(ptero_id):
     server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
@@ -702,7 +700,6 @@ def batch_process():
             time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
             
         flash(f"邮件任务完成：成功 {success_count} 封，失败 {error_count} 封。", "info")
-    # ... (Other batch actions are unchanged)
     elif action in ['suspend', 'unsuspend']:
         action_text = '冻结' if action == 'suspend' else '解冻'
         for server_id in server_ids:
@@ -835,7 +832,6 @@ def batch_process_users():
             flash("处理邮件任务时发生严重内部错误，请查看日志。", "error")
 
     elif action == 'delete':
-        # (您的删除用户逻辑放在这里，之前已修复)
         for user_id in user_ids:
             try:
                 servers_to_delete = Server.query.filter_by(owner_id=user_id).all()
@@ -865,7 +861,6 @@ def batch_process_users():
 
     return redirect(redirect_url)
 
-# ... (All routes from edit_user to the end are mostly unchanged, but I provide them for completeness)
 @app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
 def edit_user(user_id):
     redirect_url = url_for('users_list', **request.args); panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
