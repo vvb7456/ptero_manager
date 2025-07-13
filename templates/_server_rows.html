@@ -1,4 +1,4 @@
-<!-- templates/_server_rows.html (响应式修改) -->
+<!-- templates/_server_rows.html (响应式���改) -->
 {% for server in servers %}
 <tr>
     <td data-label="选择"><input type="checkbox" name="server_ids" value="{{ server.ptero_server_id }}" form="batch-form"></td>
@@ -28,14 +28,14 @@
         {% else %}<span class="status-normal">{{ server.status or '正常' }}</span>{% endif %}
     </td>
     <td data-label="操作">
-        <div style="display: flex; gap: 0.5rem; align-items: center; justify-content: flex-end;">
-            <form action="{{ url_for('set_expiry', ptero_id=server.ptero_server_id, **request.args) }}" method="post" style="display: contents;"><input type="number" name="renew_days" value="30" style="width: 120px; margin: 0;"><button type="submit" class="secondary" style="margin: 0;">续期</button></form>
-            <form action="{{ url_for('suspend_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post" onsubmit="return confirm('您确定要{% if server.status == '已冻结' %}解冻{% else %}冻结{% endif %}此服务器吗？');" style="display: contents;">
-                {% if server.status == '已冻结' %}<button type="submit" class="contrast" style="margin: 0;">解冻</button>
-                {% else %}<button type="submit" class="secondary" style="margin: 0;">冻结</button>{% endif %}
+        <div class="action-group">
+            <form action="{{ url_for('set_expiry', ptero_id=server.ptero_server_id, **request.args) }}" method="post" class="action-group">
+                <input type="number" name="renew_days" value="30">
+                <button type="submit" class="secondary">续期</button>
             </form>
-            <form action="{{ url_for('delete_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post" onsubmit="return confirm('警告！您确定要永久删除此服务器吗？');" style="display: contents;"><button type="submit" class="danger-button" style="margin: 0;">删除</button></form>
+            <a href="{{ url_for('edit_server', ptero_id=server.ptero_server_id, **request.args.to_dict()) }}" role="button" class="contrast">编辑</a>
         </div>
+    </td>
     </td>
 </tr>
 {% endfor %}

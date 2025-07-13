@@ -188,6 +188,25 @@
                 gap: 0.5rem;
             }
         }
+
+        /* 统一定义操作区样式 */
+        .action-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .action-group form {
+            margin: 0;
+        }
+        .action-group input[type="number"] {
+            width: 80px;
+            margin-bottom: 0; /* 覆盖Pico默认的margin */
+        }
+        .action-group button,
+        .action-group a[role="button"] {
+            margin-bottom: 0; /* 覆盖Pico默认的margin */
+            white-space: nowrap; /* 防止文字换行 */
+        }
     </style>
 </head>
 <body>

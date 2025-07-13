@@ -1,0 +1,58 @@
+<!-- templates/edit_server.html -->
+<article>
+    <header>
+        <h1>编辑服务器: {{ server.server_name }}</h1>
+    </header>
+
+    <div class="grid">
+        <!-- 左侧：设置 -->
+        <div>
+            <form action="{{ url_for('edit_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post">
+                <input type="hidden" name="action" value="set_date">
+                <label for="new_date">
+                    设置到期日期
+                    <input type="date" id="new_date" name="new_date" value="{{ server.expiration_date.strftime('%Y-%m-%d') if server.expiration_date else '' }}" required>
+                </label>
+                <button type="submit">更新日期</button>
+            </form>
+        </div>
+
+        <!-- 右侧：操作 -->
+        <div>
+            <!-- 冻结/解冻 -->
+            <form action="{{ url_for('edit_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post" onsubmit="return confirm('您确定要{% if server.status == '已冻结' %}解冻{% else %}冻结{% endif %}此服务器吗？');">
+                <input type="hidden" name="action" value="suspend">
+                <label>服务器状态</label>
+                {% if server.status == '已冻结' %}
+                    <button type="submit" class="contrast">解冻服务器</button>
+                {% else %}
+                    <button type="submit" class="secondary">冻结服务器</button>
+                {% endif %}
+            </form>
+
+            <!-- 删除 -->
+            <form action="{{ url_for('edit_server', ptero_id=server.ptero_server_id, **request.args) }}" method="post" onsubmit="return confirm('警告！您确定要永久删除此服务器吗？此操作不可逆！');">
+                <input type="hidden" name="action" value="delete">
+                <label>删除操作</label>
+                <button type="submit" class="danger-button">删除服务器</button>
+            </form>
+        </div>
+    </div>
+
+    <footer>
+        <a href="{{ url_for('servers_list', **request.args) }}" role="button" class="secondary">返回服务器列表</a>
+    </footer>
+</article>
+
+<style>
+.danger-button {
+    background-color: var(--pico-color-red-500);
+    border-color: var(--pico-color-red-500);
+    color: white;
+}
+.danger-button:hover {
+    background-color: var(--pico-color-red-600);
+    border-color: var(--pico-color-red-600);
+}
+</style>
+

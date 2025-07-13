@@ -604,19 +604,49 @@ def api_load_users():
 @app.route('/set_expiry/<int:ptero_id>', methods=['POST'])
 def set_expiry(ptero_id):
     server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
-    try: days = int(request.form['renew_days'])
-    except (ValueError, KeyError): flash("续期天数无效。", "error"); return redirect(url_for('servers_list', **request.args))
+    try:
+        days = int(request.form['renew_days'])
+    except (ValueError, KeyError):
+        flash("续期天数无效。", "error")
+        return redirect(url_for('servers_list', **request.args))
+    
     today = get_today()
-    new_date = (server.expiration_date or today) + timedelta(days=days)
-    if update_ptero_description(ptero_id, new_date):
-        server.expiration_date = new_date; db.session.commit()
-        flash(f"服务器 '{server.server_name}' 已成功续期至 {new_date.strftime('%Y-%m-%d')}。", "success")
+    
+    # 核心逻辑修正：判断服务器是否已过期
+    if server.expiration_date and server.expiration_date < today:
+        # 已过期，从今天开始计算
+        base_date = today
     else:
-        db.session.rollback(); flash(f"服务器 '{server.server_name}' 续期失败，无法更新面板。", "error")
+        # 未过期或永久，从原到期日或今天开始计算
+        base_date = server.expiration_date or today
+        
+    new_date = base_date + timedelta(days=days)
+    was_suspended = server.status == '已冻结'
+
+    if update_ptero_description(ptero_id, new_date):
+        server.expiration_date = new_date
+        db.session.commit()
+        flash(f"服务器 '{server.server_name}' 已成功续期至 {new_date.strftime('%Y-%m-%d')}。", "success")
+
+        # 如果续期前是冻结状态，则自动解冻
+        if was_suspended:
+            api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers/{ptero_id}/unsuspend"
+            try:
+                res = requests.post(api_url, headers=get_api_headers(), timeout=20)
+                res.raise_for_status()
+                server.status = None
+                db.session.commit()
+                flash(f"服务器 '{server.server_name}' 已自动解冻。", "info")
+            except requests.RequestException as e:
+                handle_api_error(e, f"为服务器 '{server.server_name}' 自动解冻")
+    else:
+        db.session.rollback()
+        flash(f"服务器 '{server.server_name}' 续期失败，无法更新面板。", "error")
+    
     return redirect(url_for('servers_list', **request.args))
 
 @app.route('/suspend/<int:ptero_id>', methods=['POST'])
-def suspend_server(ptero_id):
+def suspend_server(ptero_id, redirect_to_edit=False):
     server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
     action = 'unsuspend' if server.status == '已冻结' else 'suspend'
     action_text = '解冻' if action == 'unsuspend' else '冻结'
@@ -626,6 +656,9 @@ def suspend_server(ptero_id):
         server.status = None if action == 'unsuspend' else '已冻结'; db.session.commit()
         flash(f"服务器 '{server.server_name}' 已成功{action_text}。", "success")
     except requests.RequestException as e: handle_api_error(e, f"{action_text}服务器 '{server.server_name}'")
+    
+    if redirect_to_edit:
+        return redirect(url_for('edit_server', ptero_id=ptero_id, **request.args))
     return redirect(url_for('servers_list', **request.args))
 
 @app.route('/delete/<int:ptero_id>', methods=['POST'])
@@ -639,7 +672,12 @@ def delete_server(ptero_id):
         if server: db.session.delete(server); db.session.commit()
         flash(f"服务器 '{server_name}' 已成功删除。", "success")
     except requests.RequestException as e: handle_api_error(e, f"删除服务器 '{server_name}'")
-    return redirect(url_for('servers_list', **request.args))
+    
+    # 从编辑页面删除后，跳转回服务器列表
+    redirect_args = request.args.to_dict()
+    # 避免将编辑页的特定参数带回列表页
+    redirect_args.pop('action', None) 
+    return redirect(url_for('servers_list', **redirect_args))
 
 @app.route('/batch_process', methods=['POST'])
 def batch_process():
@@ -717,10 +755,32 @@ def batch_process():
         servers_to_renew = Server.query.filter(Server.ptero_server_id.in_(server_ids)).all()
         today = get_today()
         for server in servers_to_renew:
-            new_date = (server.expiration_date or today) + timedelta(days=renew_days)
+            was_suspended = server.status == '已冻结'
+            
+            # 核心逻辑修正：判断服务器是否已过期
+            if server.expiration_date and server.expiration_date < today:
+                # 已过期，从今天开始计算
+                base_date = today
+            else:
+                # 未过期或永久，从原到期日或今天开始计算
+                base_date = server.expiration_date or today
+        
+            new_date = base_date + timedelta(days=renew_days)
+
             if update_ptero_description(server.ptero_server_id, new_date):
-                server.expiration_date = new_date; success_count +=1
-            else: error_count += 1
+                server.expiration_date = new_date
+                success_count +=1
+
+                if was_suspended:
+                    try:
+                        unsuspend_url = f"{panel_url}/api/application/servers/{server.ptero_server_id}/unsuspend"
+                        res = requests.post(unsuspend_url, headers=headers, timeout=20)
+                        res.raise_for_status()
+                        server.status = None
+                    except requests.RequestException:
+                        flash(f"服务器 '{server.server_name}' 续期成功，但自动解冻失败。", "warning")
+            else: 
+                error_count += 1
         db.session.commit(); flash(f"批量续期操作完成：成功 {success_count}，失败 {error_count}。", "info")
 
     elif action == 'delete':
@@ -877,6 +937,46 @@ def edit_user(user_id):
     user_data = get_ptero_single_item(f"users/{user_id}")
     if not user_data: flash(f"无法获取 User ID: {user_id} 的信息。", "error"); return redirect(redirect_url)
     return render_template('edit_user.html', user=user_data)
+
+@app.route('/edit_server/<int:ptero_id>', methods=['GET', 'POST'])
+def edit_server(ptero_id):
+    server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
+    # 确保我们总是能返回到正确的服务器列表页面（保留筛选和排序）
+    redirect_args = request.args.to_dict()
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'set_date':
+            new_date_str = request.form.get('new_date')
+            if not new_date_str:
+                flash("日期不能为空。", "error")
+            else:
+                try:
+                    new_date = datetime.strptime(new_date_str, '%Y-%m-%d').date()
+                    if update_ptero_description(ptero_id, new_date):
+                        server.expiration_date = new_date
+                        db.session.commit()
+                        flash(f"服务器 '{server.server_name}' 的到期日期已成功更新为 {new_date.strftime('%Y-%m-%d')}。", "success")
+                    else:
+                        db.session.rollback()
+                        flash(f"服务器 '{server.server_name}' 的日期更新失败。", "error")
+                except ValueError:
+                    flash("日期格式无效。", "error")
+            # 操作完成后，重定向回编辑页面
+            return redirect(url_for('edit_server', ptero_id=ptero_id, **redirect_args))
+
+        elif action == 'suspend':
+            # 复用 suspend_server 函数，并告知它重定向回编辑页
+            return suspend_server(ptero_id, redirect_to_edit=True)
+
+        elif action == 'delete':
+            # 复用 delete_server 函数，它会处理删除并重定向到服务器列表
+            return delete_server(ptero_id)
+
+    # 对于 GET 请求，渲染编辑页面
+    return render_template('dashboard.html', page_title=f"编辑: {server.server_name}", server=server)
+
 
 @app.route('/create_user', methods=['GET', 'POST'])
 def create_user():

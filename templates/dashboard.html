@@ -20,6 +20,8 @@
             {% include '_automation.html' %}
         {% elif request.endpoint == 'settings_page' %}
             {% include '_settings.html' %}
+        {% elif request.endpoint == 'edit_server' %}
+            {% include 'edit_server.html' %}
         {% endif %}
     </div>
 </section>
@@ -29,6 +31,20 @@
 {{ super() }}
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // ---- 续期表单提交JS ----
+    window.submitRenewForm = function(serverId) {
+        const daysInput = document.getElementById('renew_days_' + serverId);
+        const hiddenInput = document.getElementById('renew_days_hidden_' + serverId);
+        const form = document.getElementById('renew_form_' + serverId);
+        
+        if (daysInput && hiddenInput && form) {
+            hiddenInput.value = daysInput.value;
+            form.submit();
+        } else {
+            console.error('Could not find renewal form elements for server ID:', serverId);
+        }
+    }
+
     // ---- 无限滚动JS逻辑 ----
     const scrollContainer = document.querySelector('.table-scroll-container');
     
