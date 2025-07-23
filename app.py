@@ -513,8 +513,8 @@ def get_processed_users_data(args):
     all_users = [u['attributes'] for u in users_data]
     search_term = args.get('search_term', '').strip()
     filter_server_status = args.get('filter_server_status', 'all')
-    sort_by = args.get('sort_by', 'username')
-    sort_order = args.get('sort_order', 'asc')
+    sort_by = args.get('sort_by', 'id')
+    sort_order = args.get('sort_order', 'desc')
 
     if search_term:
         search_term_lower = search_term.lower()
