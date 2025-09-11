@@ -1182,60 +1182,11 @@ def initialize_scheduler(app_instance):
             scheduler.add_job(id='auto_delete_task', func=automated_delete_task, trigger='cron', hour=cfg['AUTOMATION_RUN_HOUR'], minute=cfg['AUTOMATION_RUN_MINUTE'], replace_existing=True)
         if cfg.get('AUTOMATION_EMAIL_ENABLED'):
             scheduler.add_job(id='auto_email_task', func=automated_email_task, trigger='cron', hour=cfg['AUTOMATION_EMAIL_RUN_HOUR'], minute=cfg['AUTOMATION_EMAIL_RUN_MINUTE'], replace_existing=True)
-        if scheduler.get_jobs() and not scheduler.running:
-            scheduler.start()
-
-initialize_scheduler(app)
-
-# --- Gunicorn 日志集成 ---
-# 如果在 gunicorn 环境下运行, 则使用 gunicorn 的 logger
-if __name__ != '__main__':
-    gunicorn_logger = logging.getLogger('gunicorn.error')
-    app.logger.handlers = gunicorn_logger.handlers
-    app.logger.setLevel(gunicorn_logger.level)
-    app.logger.info('Gunicorn logger integration successful.')
-    
-@app.cli.command("create-admin")
-def create_admin():
-    """创建一个新的管理员用户。"""
-    import getpass
-    username = input("请输入新管理员的用户名: ")
-    if AdminUser.query.filter_by(username=username).first():
-        print(f"错误: 用户 '{username}' 已存在。")
-        return
-    
-    password = getpass.getpass("请输入新管理员的密码: ")
-    confirm_password = getpass.getpass("请再次输入密码进行确认: ")
-
-    if password != confirm_password:
-        print("错误: 两次输入的密码不匹配。")
-        return
-        
-    if not password:
-        print("错误: 密码不能为空。")
-        return
-
-    new_admin = AdminUser(username=username)
-    new_admin.set_password(password)
-    db.session.add(new_admin)
-    try:
-        db.session.commit()
-        print(f"管理员用户 '{username}' 已成功创建！")
-    except Exception as e:
-        db.session.rollback()
-        print(f"创建用户时发生错误: {e}")
-
-@app.cli.command("list-admins")
-def list_admins():
-    """列出所有管理员用户。"""
-    admins = AdminUser.query.all()
-    if not admins:
-        print("系统中没有管理员用户。")
-        return
-    print("管理员用户列表:")
-    for admin in admins:
-        print(f"- {admin.username}")
 
 if __name__ == '__main__':
     os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance'), exist_ok=True)
+    initialize_scheduler(app)
+    # 直接运行时，也确保调度器启动
+    if scheduler.get_jobs() and not scheduler.running:
+        scheduler.start()
     app.run(host='0.0.0.0', port=5000)
