@@ -243,7 +243,7 @@ def get_ptero_data(endpoint, params=None):
     if not panel_url or not config_manager.get('PTERO_API_KEY'): return None
     base_url = f"{panel_url.rstrip('/')}/api/application/{endpoint}"
     headers = get_api_headers()
-    is_single_item_endpoint = re.search(r'/\d+(\?|$)', endpoint)
+    is_single_item_endpoint = re.search(r'/\\d+(\\?|$)', endpoint)
     while True:
         try:
             query_params = {'page': page, 'per_page': 100}
@@ -311,7 +311,7 @@ def _sync_database_with_pterodactyl():
         else:
             expiration_date = None
             description = attrs.get('description', '')
-            match = re.search(r'到期时间[：:]\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', description or '')
+            match = re.search(r'到期时间[：:]\\s*(\\d{4})[/-](\\d{1,2})[/-](\\d{1,2})', description or '')
             if match:
                 try: expiration_date = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
                 except ValueError: pass
@@ -344,8 +344,8 @@ def update_ptero_description(server_ptero_id, new_expiration_date=None):
         return False
     server_details_from_api = server_data_list[0]['attributes']
     current_desc = server_details_from_api.get('description', '') or ''
-    new_desc_base = re.sub(r'到期时间[：:][^\n]*\n?|\n?到期时间[：:][^\n]*', '', current_desc, flags=re.MULTILINE).strip()
-    new_desc = f"到期时间：{new_expiration_date.strftime('%Y/%m/%d')}\n{new_desc_base}".strip() if new_expiration_date else new_desc_base
+    new_desc_base = re.sub(r'到期时间[：:][^\\n]*\\n?|\\n?到期时间[：:][^\\n]*', '', current_desc, flags=re.MULTILINE).strip()
+    new_desc = f"到期时间：{new_expiration_date.strftime('%Y/%m/%d')}\\n{new_desc_base}".strip() if new_expiration_date else new_desc_base
     details_payload = {"name": server_details_from_api['name'], "user": server_details_from_api['user'], "description": new_desc}
     try:
         res = requests.patch(f"{panel_url.rstrip('/')}/api/application/servers/{server_ptero_id}/details", headers=get_api_headers(), json=details_payload, timeout=20)
@@ -698,44 +698,51 @@ def batch_process():
         users_map = {u['attributes']['id']: u['attributes'] for u in all_users_data}
         panel_name = template_data.get('panel_name', '')
 
-        for server in servers:
-            user = users_map.get(server.owner_id)
-            if not user or not user.get('email'):
-                error_count += 1
-                continue
-            
-            # 构建一个完整的上下文变量字典
-            context = {
-                '{{panel_name}}': panel_name,
-                '{{username}}': user.get('username', '未知用户'),
-                '{{email}}': user.get('email', ''),
-                '{{server_name}}': server.server_name,
-                '{{server_id}}': str(server.ptero_server_id),
-                '{{expiration_date}}': server.expiration_date.strftime('%Y-%m-%d') if server.expiration_date else '永久'
-            }
-            
-            # 从模板获取原始主题和正文
-            final_subject = template_data.get('subject', '通知')
-            final_body = template_data.get('body', '')
-            
-            # 在主题和正文中统一替换所有变量
-            for key, value in context.items():
-                final_subject = final_subject.replace(key, str(value))
-                final_body = final_body.replace(key, str(value))
+        try:
+            for server in servers:
+                user = users_map.get(server.owner_id)
+                if not user or not user.get('email'):
+                    error_count += 1
+                    app.logger.warning(f"邮件发送任务：跳过服务器 {server.server_name} (ID: {server.ptero_server_id})，因为找不到所有者或所有者邮箱。")
+                    continue
+                
+                # 构建一个完整的上下文变量字典
+                context = {
+                    '{{panel_name}}': panel_name,
+                    '{{username}}': user.get('username', '未知用户'),
+                    '{{email}}': user.get('email', ''),
+                    '{{server_name}}': server.server_name,
+                    '{{server_id}}': str(server.ptero_server_id),
+                    '{{expiration_date}}': server.expiration_date.strftime('%Y-%m-%d') if server.expiration_date else '永久'
+                }
+                
+                # 从模板获取原始主题和正文
+                final_subject = template_data.get('subject', '通知')
+                final_body = template_data.get('body', '')
+                
+                # 在主题和正文中统一替换所有变量
+                for key, value in context.items():
+                    final_subject = final_subject.replace(key, str(value))
+                    final_body = final_body.replace(key, str(value))
 
-            sent, _ = send_email(
-                recipient_email=user['email'],
-                subject=final_subject,
-                main_content_raw=final_body,
-                greeting=f"您好, {user.get('username', '用户')}!",
-                action_text="登录面板查看",
-                action_url=panel_url
-            )
-            if sent:
-                success_count += 1
-            else:
-                error_count += 1
-            time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+                sent, msg = send_email(
+                    recipient_email=user['email'],
+                    subject=final_subject,
+                    main_content_raw=final_body,
+                    greeting=f"您好, {user.get('username', '用户')}!",
+                    action_text="登录面板查看",
+                    action_url=panel_url
+                )
+                if sent:
+                    success_count += 1
+                else:
+                    error_count += 1
+                    app.logger.error(f"邮件发送失败，收件人: {user['email']}, 错误: {msg}")
+                time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+        except Exception as e:
+            app.logger.error(f"批量发送邮件过程中发生意外错误: {e}", exc_info=True)
+            flash("处理邮件任务时发生严重内部错误，部分邮件可能未发送。请查看日志。", "error")
+            return redirect(redirect_url)
             
         flash(f"邮件任务完成：成功 {success_count} 封，失败 {error_count} 封。", "info")
     elif action in ['suspend', 'unsuspend']:
@@ -984,7 +991,7 @@ def create_user():
         email = request.form.get('email', '').strip()
         username = request.form.get('username', '').strip()
         submit_action = request.form.get('submit_action')
-        if not email or not username:
+        if not email or not username: 
             flash("邮箱和用户名不能为空。", "error"); return redirect(url_for('create_user'))
         new_user = create_ptero_user(email, username)
         if new_user:

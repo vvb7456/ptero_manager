@@ -1,5 +1,7 @@
 # gunicorn_config.py
 import os
+import logging
+from logging.handlers import RotatingFileHandler
 from app import app, initialize_scheduler, scheduler
 
 def when_ready(server):
@@ -27,10 +29,71 @@ timeout = 120
 # PID 文件
 pidfile = "ptero_manager.pid"
 
-# 日志文件
-accesslog = "/opt/ptero_manager/logs/access.log"
-errorlog = "/opt/ptero_manager/logs/error.log"
+# --- 日志配置 ---
+# 移除旧的日志文件路径配置
+# accesslog = "/opt/ptero_manager/logs/access.log"
+# errorlog = "/opt/ptero_manager/logs/error.log"
 loglevel = "info"
+
+# 使用 Python logging 进行高级配置
+# 这会同时捕获 Gunicorn 的日志和 Flask app 的日志
+logconfig_dict = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'generic': {
+            'format': '%(asctime)s [%(process)d] [%(levelname)s] %(message)s',
+            'datefmt': '[%Y-%m-%d %H:%M:%S %z]',
+            'class': 'logging.Formatter',
+        },
+    },
+    'handlers': {
+        # 控制台输出 Handler
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'generic',
+            'stream': 'ext://sys.stdout',
+        },
+        # 错误日志文件 Handler (轮转)
+        'error_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'formatter': 'generic',
+            'filename': '/opt/ptero_manager/logs/error.log',
+            'maxBytes': 1024 * 1024 * 10,  # 10 MB
+            'backupCount': 5,
+            'encoding': 'utf-8',
+        },
+        # 访问日志文件 Handler (轮转)
+        'access_file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'formatter': 'generic',
+            'filename': '/opt/ptero_manager/logs/access.log',
+            'maxBytes': 1024 * 1024 * 10,  # 10 MB
+            'backupCount': 5,
+            'encoding': 'utf-8',
+        },
+    },
+    'loggers': {
+        # Gunicorn 的错误日志，应用日志也会被定向到这里
+        'gunicorn.error': {
+            'handlers': ['console', 'error_file'],
+            'level': 'INFO',
+            'propagate': False, # 防止向 root logger 传播
+        },
+        # Gunicorn 的访问日志
+        'gunicorn.access': {
+            'handlers': ['access_file'],
+            'level': 'INFO',
+            'propagate': False, # 防止向 root logger 传播
+        },
+    },
+    # Root logger 配置，可以捕获其他未明确指定的日志
+    'root': {
+        'level': 'INFO',
+        'handlers': ['console', 'error_file'],
+    },
+}
+
 
 # 预加载应用
 preload_app = True
