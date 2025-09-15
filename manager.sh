@@ -69,7 +69,7 @@ start() {
     cd "$APP_DIR" || exit
 
     # 启动 Gunicorn (已加入 --preload 参数)
-    gunicorn ${APP_MODULE} \
+    gunicorn --config gunicorn_config.py ${APP_MODULE} \
       --workers ${WORKERS} \
       --worker-class ${WORKER_CLASS} \
       --timeout ${TIMEOUT} \
