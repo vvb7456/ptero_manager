@@ -243,7 +243,7 @@ def get_ptero_data(endpoint, params=None):
     if not panel_url or not config_manager.get('PTERO_API_KEY'): return None
     base_url = f"{panel_url.rstrip('/')}/api/application/{endpoint}"
     headers = get_api_headers()
-    is_single_item_endpoint = re.search(r'/\\d+(\\?|$)', endpoint)
+    is_single_item_endpoint = re.search(r'/\d+(\?|$)', endpoint)
     while True:
         try:
             query_params = {'page': page, 'per_page': 100}
@@ -311,7 +311,7 @@ def _sync_database_with_pterodactyl():
         else:
             expiration_date = None
             description = attrs.get('description', '')
-            match = re.search(r'到期时间[：:]\\s*(\\d{4})[/-](\\d{1,2})[/-](\\d{1,2})', description or '')
+            match = re.search(r'到期时间[：:]\s*(\d{4})[/-](\d{1,2})[/-](\d{1,2})', description or '')
             if match:
                 try: expiration_date = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
                 except ValueError: pass
@@ -344,8 +344,8 @@ def update_ptero_description(server_ptero_id, new_expiration_date=None):
         return False
     server_details_from_api = server_data_list[0]['attributes']
     current_desc = server_details_from_api.get('description', '') or ''
-    new_desc_base = re.sub(r'到期时间[：:][^\\n]*\\n?|\\n?到期时间[：:][^\\n]*', '', current_desc, flags=re.MULTILINE).strip()
-    new_desc = f"到期时间：{new_expiration_date.strftime('%Y/%m/%d')}\\n{new_desc_base}".strip() if new_expiration_date else new_desc_base
+    new_desc_base = re.sub(r'到期时间[：:][^\n]*\n?|\n?到期时间[：:][^\n]*', '', current_desc, flags=re.MULTILINE).strip()
+    new_desc = f"到期时间：{new_expiration_date.strftime('%Y/%m/%d')}\n{new_desc_base}".strip() if new_expiration_date else new_desc_base
     details_payload = {"name": server_details_from_api['name'], "user": server_details_from_api['user'], "description": new_desc}
     try:
         res = requests.patch(f"{panel_url.rstrip('/')}/api/application/servers/{server_ptero_id}/details", headers=get_api_headers(), json=details_payload, timeout=20)
