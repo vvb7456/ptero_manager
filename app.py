@@ -128,6 +128,20 @@ app.config['SCHEDULER_TIMEZONE'] = LOCAL_TZ
 db = SQLAlchemy(app)
 scheduler = APScheduler()
 
+def format_utc_to_local(utc_dt):
+    """将 UTC datetime 对象转换为本地时区并格式化为字符串的 Jinja 过滤器。"""
+    if not utc_dt:
+        return ""
+    # 首先，让 naive datetime 对象感知到它是 UTC 时间
+    aware_utc_dt = pytz.utc.localize(utc_dt)
+    # 然后，将其转换为本地时区
+    local_dt = aware_utc_dt.astimezone(LOCAL_TZ)
+    # 返回格式化后的字符串
+    return local_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+# 注册自定义过滤器
+app.jinja_env.filters['localtime'] = format_utc_to_local
+
 EMAIL_TEMPLATE_FILE = 'email_template.json'
 REMINDER_TEMPLATE_FILE = 'reminder_template.json'
 CREATE_USER_TEMPLATE_FILE = 'create_user_template.json'
@@ -135,6 +149,11 @@ CREATE_USER_TEMPLATE_FILE = 'create_user_template.json'
 @app.before_request
 def check_auth():
     # 现在我们检查 'admin_user_id' 是否在 session 中
+    if 'admin_user_id' in session and 'admin_username' not in session:
+        user = AdminUser.query.get(session['admin_user_id'])
+        if user:
+            session['admin_username'] = user.username
+            
     if not session.get('admin_user_id') and request.endpoint not in ('login', 'static'):
         return redirect(url_for('login'))
 
@@ -151,19 +170,25 @@ def login():
         if user and user.check_password(password):
             session.clear()
             session['admin_user_id'] = user.id
-            session.permanent = True # 让会话持久
+            session['admin_username'] = user.username 
+            session.permanent = True 
             flash('登录成功！', 'success')
+            log_activity(user.username, 'login', '成功', f"用户 {user.username} 成功登录。")
             next_url = request.args.get('next') or url_for('dashboard')
             return redirect(next_url)
         else:
             flash('用户名或密码无效。', 'error')
+            log_activity(username, 'login', '失败', f"尝试使用用户名 {username} 登录失败。")
             return redirect(url_for('login'))
     return render_template('login.html')
 
 @app.route('/logout')
 def logout():
+    username = session.get('admin_username', '未知用户')
     session.pop('admin_user_id', None)
+    session.pop('admin_username', None)
     flash('您已成功退出登录。', 'info')
+    log_activity(username, 'logout', '信息', f"用户 {username} 成功退出登录。")
     return redirect(url_for('login'))
 
 def get_today():
@@ -202,6 +227,32 @@ class AdminUser(db.Model):
 
     def __repr__(self):
         return f'<AdminUser {self.username}>'
+
+class ActivityLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    actor = db.Column(db.String(100), nullable=False)
+    action = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(50), nullable=False)
+    details = db.Column(db.Text, nullable=True)
+
+    def __repr__(self):
+        return f'<ActivityLog {self.timestamp} - {self.actor} - {self.action}>'
+
+def log_activity(actor, action, status, details=''):
+    """辅助函数，用于向数据库中添加一条活动日志。"""
+    try:
+        log_entry = ActivityLog(
+            actor=actor,
+            action=action,
+            status=status,
+            details=details
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        app.logger.error(f"Failed to log activity: {e}", exc_info=True)
 
 class Pagination:
     def __init__(self, page, per_page, total_count, items):
@@ -613,20 +664,18 @@ def api_load_users():
 @app.route('/set_expiry/<int:ptero_id>', methods=['POST'])
 def set_expiry(ptero_id):
     server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
+    actor = session.get('admin_username', '未知管理员')
     try:
         days = int(request.form['renew_days'])
     except (ValueError, KeyError):
         flash("续期天数无效。", "error")
+        log_activity(actor, 'set_expiry', '失败', f"尝试为服务器 '{server.server_name}' (ID: {ptero_id}) 续期失败，原因：续期天数无效。")
         return redirect(url_for('servers_list', **request.args))
     
     today = get_today()
-    
-    # 核心逻辑修正：判断服务器是否已过期
     if server.expiration_date and server.expiration_date < today:
-        # 已过期，从今天开始计算
         base_date = today
     else:
-        # 未过期或永久，从原到期日或今天开始计算
         base_date = server.expiration_date or today
         
     new_date = base_date + timedelta(days=days)
@@ -636,8 +685,8 @@ def set_expiry(ptero_id):
         server.expiration_date = new_date
         db.session.commit()
         flash(f"服务器 '{server.server_name}' 已成功续期至 {new_date.strftime('%Y-%m-%d')}。", "success")
+        log_activity(actor, 'set_expiry', '成功', f"成功为服务器 '{server.server_name}' (ID: {ptero_id}) 续期 {days} 天至 {new_date.strftime('%Y-%m-%d')}。")
 
-        # 如果续期前是冻结状态，则自动解冻
         if was_suspended:
             api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers/{ptero_id}/unsuspend"
             try:
@@ -646,25 +695,35 @@ def set_expiry(ptero_id):
                 server.status = None
                 db.session.commit()
                 flash(f"服务器 '{server.server_name}' 已自动解冻。", "info")
+                log_activity(actor, 'unsuspend', '信息', f"服务器 '{server.server_name}' (ID: {ptero_id}) 在续期后被自动解冻。")
             except requests.RequestException as e:
                 handle_api_error(e, f"为服务器 '{server.server_name}' 自动解冻")
+                log_activity(actor, 'unsuspend', '失败', f"尝试为服务器 '{server.server_name}' (ID: {ptero_id}) 自动解冻失败。API 错误。")
     else:
         db.session.rollback()
         flash(f"服务器 '{server.server_name}' 续期失败，无法更新面板。", "error")
+        log_activity(actor, 'set_expiry', '失败', f"尝试为服务器 '{server.server_name}' (ID: {ptero_id}) 续期失败，原因：更新面板描述时出错。")
     
     return redirect(url_for('servers_list', **request.args))
 
 @app.route('/suspend/<int:ptero_id>', methods=['POST'])
 def suspend_server(ptero_id, redirect_to_edit=False):
     server = Server.query.filter_by(ptero_server_id=ptero_id).first_or_404()
+    actor = session.get('admin_username', '未知管理员')
     action = 'unsuspend' if server.status == '已冻结' else 'suspend'
     action_text = '解冻' if action == 'unsuspend' else '冻结'
     api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers/{ptero_id}/{action}"
+    
     try:
-        res = requests.post(api_url, headers=get_api_headers(), timeout=20); res.raise_for_status()
-        server.status = None if action == 'unsuspend' else '已冻结'; db.session.commit()
+        res = requests.post(api_url, headers=get_api_headers(), timeout=20)
+        res.raise_for_status()
+        server.status = None if action == 'unsuspend' else '已冻结'
+        db.session.commit()
         flash(f"服务器 '{server.server_name}' 已成功{action_text}。", "success")
-    except requests.RequestException as e: handle_api_error(e, f"{action_text}服务器 '{server.server_name}'")
+        log_activity(actor, action, '成功', f"成功{action_text}服务器 '{server.server_name}' (ID: {ptero_id})。")
+    except requests.RequestException as e:
+        handle_api_error(e, f"{action_text}服务器 '{server.server_name}'")
+        log_activity(actor, action, '失败', f"尝试{action_text}服务器 '{server.server_name}' (ID: {ptero_id}) 失败。API 错误。")
     
     if redirect_to_edit:
         return redirect(url_for('edit_server', ptero_id=ptero_id, **request.args))
@@ -674,17 +733,25 @@ def suspend_server(ptero_id, redirect_to_edit=False):
 def delete_server(ptero_id):
     server = Server.query.filter_by(ptero_server_id=ptero_id).first()
     server_name = server.server_name if server else f"ID {ptero_id}"
+    actor = session.get('admin_username', '未知管理员')
     api_url = f"{config_manager.get('PTERO_PANEL_URL').rstrip('/')}/api/application/servers/{ptero_id}"
+    
     try:
         res = requests.delete(api_url, headers=get_api_headers(), timeout=20)
-        if res.status_code not in [204, 404]: res.raise_for_status()
-        if server: db.session.delete(server); db.session.commit()
+        if res.status_code not in [204, 404]:
+            res.raise_for_status()
+        
+        if server:
+            db.session.delete(server)
+            db.session.commit()
+        
         flash(f"服务器 '{server_name}' 已成功删除。", "success")
-    except requests.RequestException as e: handle_api_error(e, f"删除服务器 '{server_name}'")
+        log_activity(actor, 'delete_server', '成功', f"成功删除服务器 '{server_name}' (ID: {ptero_id})。")
+    except requests.RequestException as e:
+        handle_api_error(e, f"删除服务器 '{server_name}'")
+        log_activity(actor, 'delete_server', '失败', f"尝试删除服务器 '{server_name}' (ID: {ptero_id}) 失败。API 错误。")
     
-    # 从编辑页面删除后，跳转回服务器列表
     redirect_args = request.args.to_dict()
-    # 避免将编辑页的特定参数带回列表页
     redirect_args.pop('action', None) 
     return redirect(url_for('servers_list', **redirect_args))
 
@@ -697,11 +764,14 @@ def batch_process():
     success_count, error_count = 0, 0; headers = get_api_headers()
     
     if action == 'email':
+        actor = session.get('admin_username', '未知管理员')
+        log_activity(actor, 'batch_email', '信息', f"开始执行批量发送邮件任务，目标服务器数量: {len(server_ids)}。")
         template_data = load_email_template()
         servers = db.session.query(Server).filter(Server.ptero_server_id.in_(server_ids)).all()
         all_users_data = get_ptero_data("users")
         if not all_users_data:
             flash("无法从API获取用户列表以发送邮件。", "error")
+            log_activity(actor, 'batch_email', '失败', "任务失败，原因：无法从API获取用户列表。")
             return redirect(redirect_url)
         
         users_map = {u['attributes']['id']: u['attributes'] for u in all_users_data}
@@ -715,70 +785,73 @@ def batch_process():
                     app.logger.warning(f"邮件发送任务：跳过服务器 {server.server_name} (ID: {server.ptero_server_id})，因为找不到所有者或所有者邮箱。")
                     continue
                 
-                # 构建一个完整的上下文变量字典
                 context = {
-                    '{{panel_name}}': panel_name,
-                    '{{username}}': user.get('username', '未知用户'),
-                    '{{email}}': user.get('email', ''),
-                    '{{server_name}}': server.server_name,
+                    '{{panel_name}}': panel_name, '{{username}}': user.get('username', '未知用户'),
+                    '{{email}}': user.get('email', ''), '{{server_name}}': server.server_name,
                     '{{server_id}}': str(server.ptero_server_id),
                     '{{expiration_date}}': server.expiration_date.strftime('%Y-%m-%d') if server.expiration_date else '永久'
                 }
                 
-                # 从模板获取原始主题和正文
                 final_subject = template_data.get('subject', '通知')
                 final_body = template_data.get('body', '')
                 
-                # 在主题和正文中统一替换所有变量
                 for key, value in context.items():
                     final_subject = final_subject.replace(key, str(value))
                     final_body = final_body.replace(key, str(value))
 
                 sent, msg = send_email(
-                    recipient_email=user['email'],
-                    subject=final_subject,
-                    main_content_raw=final_body,
-                    greeting=f"您好, {user.get('username', '用户')}!",
-                    action_text="登录面板查看",
-                    action_url=panel_url
+                    recipient_email=user['email'], subject=final_subject, main_content_raw=final_body,
+                    greeting=f"您好, {user.get('username', '用户')}!", action_text="登录面板查看", action_url=panel_url
                 )
-                if sent:
-                    success_count += 1
+                if sent: success_count += 1
                 else:
                     error_count += 1
                     app.logger.error(f"邮件发送失败，收件人: {user['email']}, 错误: {msg}")
                 time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+            
+            flash(f"邮件任务完成：成功 {success_count} 封，失败 {error_count} 封。", "info")
+            log_activity(actor, 'batch_email', '成功', f"批量邮件任务完成。成功: {success_count}, 失败: {error_count}。")
+
         except Exception as e:
             app.logger.error(f"批量发送邮件过程中发生意外错误: {e}", exc_info=True)
             flash("处理邮件任务时发生严重内部错误，部分邮件可能未发送。请查看日志。", "error")
+            log_activity(actor, 'batch_email', '失败', f"执行批量邮件任务时发生意外错误: {e}")
             return redirect(redirect_url)
-            
-        flash(f"邮件任务完成：成功 {success_count} 封，失败 {error_count} 封。", "info")
     elif action in ['suspend', 'unsuspend']:
+        actor = session.get('admin_username', '未知管理员')
         action_text = '冻结' if action == 'suspend' else '解冻'
+        log_activity(actor, f'batch_{action}', '信息', f"开始执行批量{action_text}任务，目标服务器数量: {len(server_ids)}。")
         for server_id in server_ids:
             try:
-                res = requests.post(f"{panel_url}/api/application/servers/{server_id}/{action}", headers=headers, timeout=20); res.raise_for_status()
+                res = requests.post(f"{panel_url}/api/application/servers/{server_id}/{action}", headers=headers, timeout=20)
+                res.raise_for_status()
                 server = Server.query.filter_by(ptero_server_id=server_id).first()
-                if server: server.status = '已冻结' if action == 'suspend' else None
+                if server:
+                    server.status = '已冻结' if action == 'suspend' else None
                 success_count += 1
-            except requests.RequestException: error_count += 1
-        db.session.commit(); flash(f"批量{action_text}操作完成：成功 {success_count}，失败 {error_count}。", "info")
+            except requests.RequestException:
+                error_count += 1
+        db.session.commit()
+        flash(f"批量{action_text}操作完成：成功 {success_count}，失败 {error_count}。", "info")
+        log_activity(actor, f'batch_{action}', '成功', f"批量{action_text}任务完成。成功: {success_count}, 失败: {error_count}。")
 
     elif action == 'renew':
+        actor = session.get('admin_username', '未知管理员')
         renew_days = request.form.get('renew_days', type=int)
-        if not renew_days or renew_days <= 0: flash("请输入有效的续期天数。", "error"); return redirect(redirect_url)
+        if not renew_days or renew_days <= 0:
+            flash("请输入有效的续期天数。", "error")
+            log_activity(actor, 'batch_renew', '失败', "任务失败，原因：续期天数无效。")
+            return redirect(redirect_url)
+        
+        log_activity(actor, 'batch_renew', '信息', f"开始执行批量续期任务，续期 {renew_days} 天，目标服务器数量: {len(server_ids)}。")
         servers_to_renew = Server.query.filter(Server.ptero_server_id.in_(server_ids)).all()
         today = get_today()
         for server in servers_to_renew:
             was_suspended = server.status == '已冻结'
             
-            # 核心逻辑修正：判断服务器是否已过期
             if server.expiration_date and server.expiration_date < today:
-                # 已过期，从今天开始计算
                 base_date = today
             else:
-                # 未过期或永久，从原到期日或今天开始计算
                 base_date = server.expiration_date or today
         
             new_date = base_date + timedelta(days=renew_days)
@@ -797,19 +870,28 @@ def batch_process():
                         flash(f"服务器 '{server.server_name}' 续期成功，但自动解冻失败。", "warning")
             else: 
                 error_count += 1
-        db.session.commit(); flash(f"批量续期操作完成：成功 {success_count}，失败 {error_count}。", "info")
+        db.session.commit()
+        flash(f"批量续期操作完成：成功 {success_count}，失败 {error_count}。", "info")
+        log_activity(actor, 'batch_renew', '成功', f"批量续期任务完成。成功: {success_count}, 失败: {error_count}。")
 
     elif action == 'delete':
+        actor = session.get('admin_username', '未知管理员')
+        log_activity(actor, 'batch_delete', '信息', f"开始执行批量删除任务，目标服务器数量: {len(server_ids)}。")
         for server_id in server_ids:
             try:
                 res = requests.delete(f"{panel_url}/api/application/servers/{server_id}", headers=headers, timeout=20)
-                if res.status_code not in [204, 404]: res.raise_for_status()
+                if res.status_code not in [204, 404]:
+                    res.raise_for_status()
                 server = Server.query.filter_by(ptero_server_id=server_id).first()
-                if server: db.session.delete(server)
+                if server:
+                    db.session.delete(server)
                 success_count += 1
-            except requests.RequestException: error_count += 1
-        if success_count > 0: db.session.commit()
+            except requests.RequestException:
+                error_count += 1
+        if success_count > 0:
+            db.session.commit()
         flash(f"批量删除操作完成：成功 {success_count}，失败 {error_count}。", "info")
+        log_activity(actor, 'batch_delete', '成功', f"批量删除任务完成。成功: {success_count}, 失败: {error_count}。")
 
     return redirect(redirect_url)
 
@@ -1000,19 +1082,29 @@ def create_user():
         email = request.form.get('email', '').strip()
         username = request.form.get('username', '').strip()
         submit_action = request.form.get('submit_action')
+        actor = session.get('admin_username', '未知管理员')
+        
         if not email or not username: 
-            flash("邮箱和用户名不能为空。", "error"); return redirect(url_for('create_user'))
+            flash("邮箱和用户名不能为空。", "error")
+            log_activity(actor, 'create_user', '失败', f"尝试创建用户失败，原因：邮箱或用户名为空。")
+            return redirect(url_for('create_user'))
+
         new_user = create_ptero_user(email, username)
         if new_user:
+            log_activity(actor, 'create_user', '成功', f"成功创建用户 '{username}' (Email: {email})。")
             if submit_action == 'create_and_server':
                 return redirect(url_for('create_server_page', new_user_id=new_user['id']))
             else:
                 return redirect(url_for('users_list'))
+        else:
+            # create_ptero_user 内部已经 flash 了错误信息
+            log_activity(actor, 'create_user', '失败', f"尝试创建用户 '{username}' (Email: {email}) 失败。API 错误。")
         return redirect(url_for('create_user'))
     return render_template('dashboard.html', page_title="创建新用户")
 
 @app.route('/create_server', methods=['GET', 'POST'])
 def create_server_page():
+    actor = session.get('admin_username', '未知管理员')
     if request.method == 'POST':
         try:
             cfg = config_manager.config
@@ -1026,9 +1118,17 @@ def create_server_page():
             backups = int(request.form.get('backups') or cfg.get('DEFAULT_BACKUPS')); allocations = int(request.form.get('allocations') or cfg.get('DEFAULT_ALLOCATIONS'))
             if not all([user_id, node_id, allocation_id, server_name, egg_id, startup_command]): raise ValueError("必填字段缺失")
         except (ValueError, TypeError):
-            flash("所有必填字段均为必填项，且资源配置需为有效整数。", "error"); return redirect(url_for('create_server_page'))
+            flash("所有必填字段均为必填项，且资源配置需为有效整数。", "error")
+            log_activity(actor, 'create_server', '失败', f"尝试创建服务器 '{server_name}' 失败，原因：表单数据无效或不完整。")
+            return redirect(url_for('create_server_page'))
+        
         if create_ptero_server(user_id, server_name, expiration_days, node_id, allocation_id, egg_id, docker_image, startup_command, environment, cpu, memory, disk, databases, backups, allocations):
-            flash(f"服务器 '{server_name}' 创建成功！", "success"); return redirect(url_for('servers_list'))
+            flash(f"服务器 '{server_name}' 创建成功！", "success")
+            log_activity(actor, 'create_server', '成功', f"成功为用户 ID {user_id} 创建服务器 '{server_name}'。")
+            return redirect(url_for('servers_list'))
+        else:
+            # create_ptero_server 内部已 flash 错误
+            log_activity(actor, 'create_server', '失败', f"尝试为用户 ID {user_id} 创建服务器 '{server_name}' 失败。API 错误。")
         return redirect(url_for('create_server_page'))
     
     new_user_id = request.args.get('new_user_id', type=int)
@@ -1038,6 +1138,7 @@ def create_server_page():
 
 @app.route('/settings', methods=['GET', 'POST'])
 def settings_page():
+    actor = session.get('admin_username', '未知管理员')
     if request.method == 'POST':
         old_url = config_manager.get('PTERO_PANEL_URL'); old_key = config_manager.get('PTERO_API_KEY')
         form_data = request.form.to_dict()
@@ -1050,10 +1151,16 @@ def settings_page():
         if new_url != old_url or new_key != old_key:
             try:
                 num_rows_deleted = db.session.query(Server).delete(); db.session.commit()
-                if num_rows_deleted > 0: flash(f"检测到面板URL或API Key已更改，已清除 {num_rows_deleted} 条本地缓存。", "info")
-            except Exception as e: db.session.rollback(); app.logger.error(f"清除本地数据时出错: {e}")
+                if num_rows_deleted > 0:
+                    flash(f"检测到面板URL或API Key已更改，已清除 {num_rows_deleted} 条本地缓存。", "info")
+                    log_activity(actor, 'settings_change', '信息', f"面板URL或API Key已更改，清除了 {num_rows_deleted} 条本地缓存。")
+            except Exception as e:
+                db.session.rollback()
+                app.logger.error(f"清除本地数据时出错: {e}")
         flash("系统设置已成功保存！重启应用后生效。", "success")
+        log_activity(actor, 'settings_change', '成功', "成功保存了系统设置。")
         return redirect(url_for('settings_page'))
+    
     settings_display = {k: ('********' if any(s in k for s in ['KEY', 'PASSWORD']) and v else v) for k, v in config_manager.config.items()}
     all_nests_data = get_ptero_data("nests"); all_nodes_data = get_ptero_data("nodes")
     all_nests = [n['attributes'] for n in all_nests_data] if all_nests_data else []
@@ -1067,6 +1174,7 @@ def settings_page():
 @app.route('/automation', methods=['GET', 'POST'])
 def automation_page():
     if request.method == 'POST':
+        actor = session.get('admin_username', '未知管理员')
         automation_settings = {
             'AUTOMATION_RUN_HOUR': request.form.get('AUTOMATION_RUN_HOUR'), 'AUTOMATION_RUN_MINUTE': request.form.get('AUTOMATION_RUN_MINUTE'),
             'AUTOMATION_DELETE_DAYS': request.form.get('AUTOMATION_DELETE_DAYS'), 'AUTOMATION_EMAIL_RUN_HOUR': request.form.get('AUTOMATION_EMAIL_RUN_HOUR'),
@@ -1075,25 +1183,35 @@ def automation_page():
         }
         config_manager.save_config(automation_settings)
         flash("自动化设置已保存。请重启应用以使新计划生效。", "success")
+        log_activity(actor, 'automation_settings_change', '成功', "成功保存了自动化设置。")
         return redirect(url_for('automation_page'))
     return render_template('dashboard.html', page_title="自动化设置", settings=config_manager.config)
     
 @app.route('/email_template', methods=['GET', 'POST'])
 def email_template():
     if request.method == 'POST':
+        actor = session.get('admin_username', '未知管理员')
         form_type = request.form.get('form_type')
         if form_type == 'bulk':
             bulk_data = {'panel_name': request.form.get('panel_name'), 'subject': request.form.get('subject'), 'body': request.form.get('body')}
-            save_email_template(bulk_data); flash("批量邮件模板已保存。", "success")
+            save_email_template(bulk_data)
+            flash("批量邮件模板已保存。", "success")
+            log_activity(actor, 'email_template_change', '成功', "保存了批量邮件模板。")
         elif form_type == 'reminder':
             reminder_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
-            save_reminder_template(reminder_data); flash("到期提醒模板已保存。", "success")
+            save_reminder_template(reminder_data)
+            flash("到期提醒模板已保存。", "success")
+            log_activity(actor, 'email_template_change', '成功', "保存了到期提醒模板。")
         elif form_type == 'pre_delete_reminder':
             pre_delete_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
-            save_pre_delete_template(pre_delete_data); flash("删除前提醒模板已保存。", "success")
+            save_pre_delete_template(pre_delete_data)
+            flash("删除前提醒模板已保存。", "success")
+            log_activity(actor, 'email_template_change', '成功', "保存了删除前提醒模板。")
         elif form_type == 'create_user':
             create_user_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
-            save_create_user_template(create_user_data); flash("新用户通知模板已保存。", "success")
+            save_create_user_template(create_user_data)
+            flash("新用户通知模板已保存。", "success")
+            log_activity(actor, 'email_template_change', '成功', "保存了新用户通知模板。")
         return redirect(url_for('email_template'))
     return render_template('dashboard.html', page_title="邮件模板管理", template_data=load_email_template(), reminder_template_data=load_reminder_template(), pre_delete_template_data=load_pre_delete_template(), create_user_template_data=load_create_user_template())
 
@@ -1115,54 +1233,125 @@ def api_get_nest_egg_variables(nest_id, egg_id):
     variables = egg_data_list[0].get('attributes', {}).get('relationships', {}).get('variables', {}).get('data', [])
     return jsonify({"variables": [v['attributes'] for v in variables]})
 
+@app.route('/activity_logs')
+def activity_logs():
+    page = request.args.get('page', 1, type=int)
+    per_page = 30
+    
+    query = ActivityLog.query
+
+    # 筛选
+    actor_filter = request.args.get('actor')
+    action_filter = request.args.get('action')
+    status_filter = request.args.get('status')
+
+    if actor_filter:
+        query = query.filter(ActivityLog.actor == actor_filter)
+    if action_filter:
+        query = query.filter(ActivityLog.action == action_filter)
+    if status_filter:
+        query = query.filter(ActivityLog.status == status_filter)
+
+    # 获取用于下拉菜单的独立值
+    distinct_actors = [actor[0] for actor in db.session.query(ActivityLog.actor).distinct().order_by(ActivityLog.actor).all()]
+    distinct_actions = [action[0] for action in db.session.query(ActivityLog.action).distinct().order_by(ActivityLog.action).all()]
+
+    # 排序
+    query = query.order_by(desc(ActivityLog.timestamp))
+    
+    total_logs = query.count()
+    logs_for_page = query.offset((page - 1) * per_page).limit(per_page).all()
+    
+    pagination = Pagination(page, per_page, total_logs, logs_for_page)
+    
+    return render_template('dashboard.html', page_title="活动日志", logs=logs_for_page, pagination=pagination,
+                           distinct_actors=distinct_actors, distinct_actions=distinct_actions)
+
 def automated_suspend_task():
     with app.app_context():
+        log_activity("系统", "automated_suspend_task", "信息", "开始执行自动冻结任务。")
+        success_count = 0
         try:
             yesterday = get_today() - timedelta(days=1)
             servers_to_suspend = Server.query.filter(Server.expiration_date == yesterday, or_(Server.status == None, Server.status != '已冻结')).all()
-            if not servers_to_suspend: return
-            headers = get_api_headers(); panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+            if not servers_to_suspend:
+                log_activity("系统", "automated_suspend_task", "信息", "任务完成，没有需要冻结的服务器。")
+                return
+            
+            headers = get_api_headers()
+            panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
             for server in servers_to_suspend:
                 try:
-                    res = requests.post(f"{panel_url}/api/application/servers/{server.ptero_server_id}/suspend", headers=headers, timeout=20); res.raise_for_status()
-                    server.status = '已冻结'; db.session.commit()
-                except requests.RequestException: db.session.rollback()
-        except Exception as e: app.logger.error(f"[自动化任务] 冻结任务出错: {e}", exc_info=True)
+                    res = requests.post(f"{panel_url}/api/application/servers/{server.ptero_server_id}/suspend", headers=headers, timeout=20)
+                    res.raise_for_status()
+                    server.status = '已冻结'
+                    db.session.commit()
+                    success_count += 1
+                except requests.RequestException as e_req:
+                    db.session.rollback()
+                    app.logger.error(f"[自动化任务] 冻结服务器 {server.ptero_server_id} 失败: {e_req}")
+
+            log_activity("系统", "automated_suspend_task", "成功", f"任务完成，成功冻结了 {success_count} 台服务器。")
+        except Exception as e:
+            log_activity("系统", "automated_suspend_task", "失败", f"执行冻结任务时发生意外错误: {e}")
+            app.logger.error(f"[自动化任务] 冻结任务出错: {e}", exc_info=True)
 
 def automated_delete_task():
     with app.app_context():
+        log_activity("系统", "automated_delete_task", "信息", "开始执行自动删除任务。")
+        success_count = 0
         try:
             delete_threshold_date = get_today() - timedelta(days=config_manager.get('AUTOMATION_DELETE_DAYS', 14))
             servers_to_delete = Server.query.filter(Server.expiration_date <= delete_threshold_date).all()
-            if not servers_to_delete: return
-            headers = get_api_headers(); panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
+            if not servers_to_delete:
+                log_activity("系统", "automated_delete_task", "信息", "任务完成，没有需要删除的服务器。")
+                return
+
+            headers = get_api_headers()
+            panel_url = config_manager.get('PTERO_PANEL_URL').rstrip('/')
             for server in servers_to_delete:
                 try:
                     res = requests.delete(f"{panel_url}/api/application/servers/{server.ptero_server_id}", headers=headers, timeout=20)
-                    if res.status_code not in [204, 404]: res.raise_for_status()
-                    db.session.delete(server); db.session.commit()
-                except requests.RequestException: db.session.rollback()
-        except Exception as e: app.logger.error(f"[自动化任务] 删除任务出错: {e}", exc_info=True)
+                    if res.status_code not in [204, 404]:
+                        res.raise_for_status()
+                    db.session.delete(server)
+                    db.session.commit()
+                    success_count += 1
+                except requests.RequestException as e_req:
+                    db.session.rollback()
+                    app.logger.error(f"[自动化任务] 删除服务器 {server.ptero_server_id} 失败: {e_req}")
+            
+            log_activity("系统", "automated_delete_task", "成功", f"任务完成，成功删除了 {success_count} 台服务器。")
+        except Exception as e:
+            log_activity("系统", "automated_delete_task", "失败", f"执行删除任务时发生意外错误: {e}")
+            app.logger.error(f"[自动化任务] 删除任务出错: {e}", exc_info=True)
 
 def automated_email_task():
     with app.app_context():
+        log_activity("系统", "automated_email_task", "信息", "开始执行到期前邮件提醒任务。")
+        email_sent_count = 0
         try:
             tomorrow = get_today() + timedelta(days=1)
             servers_to_notify = Server.query.filter(Server.expiration_date == tomorrow).all()
-            if not servers_to_notify: return
+            if not servers_to_notify:
+                log_activity("系统", "automated_email_task", "信息", "任务完成，没有需要发送到期提醒的服务器。")
+                return
+
             owners_map = {}; [owners_map.setdefault(s.owner_id, []).append(s) for s in servers_to_notify]
             all_users_data = get_ptero_data("users")
-            if not all_users_data: return
+            if not all_users_data:
+                log_activity("系统", "automated_email_task", "失败", "无法从API获取用户列表，任务中止。")
+                return
+
             users_email_map = {u['attributes']['id']: u['attributes']['email'] for u in all_users_data if u.get('attributes')}
             reminder_template = load_reminder_template()
             panel_url = config_manager.get('PTERO_PANEL_URL')
             
             for owner_id, owner_servers in owners_map.items():
-                if not (recipient_email := users_email_map.get(owner_id)): continue
+                if not (recipient_email := users_email_map.get(owner_id)):
+                    continue
                 
                 server_list_str = "\n".join([f"- {s.server_name} (ID: {s.ptero_server_id})" for s in owner_servers])
-                
-                # 获取原始的主题和正文模板
                 subject_raw = reminder_template.get('subject', '【重要】您的服务器即将到期')
                 body_raw = reminder_template.get('body', '')
 
@@ -1174,35 +1363,39 @@ def automated_email_task():
                     '{{panel_name}}': load_email_template().get('panel_name', 'Pterodactyl')
                 }
 
-                # 同时替换主题和正文中的变量
                 for key, value in context_vars.items():
                     subject_raw = subject_raw.replace(key, str(value))
                     body_raw = body_raw.replace(key, str(value))
                 
-                send_email(
-                    recipient_email=recipient_email,
-                    subject=subject_raw, # 使用已处理的主题
-                    main_content_raw=body_raw,
-                    greeting=f"您好, {owner_servers[0].owner_username}!",
-                    action_text="登录面板处理",
-                    action_url=panel_url
+                sent, _ = send_email(
+                    recipient_email=recipient_email, subject=subject_raw, main_content_raw=body_raw,
+                    greeting=f"您好, {owner_servers[0].owner_username}!", action_text="登录面板处理", action_url=panel_url
                 )
+                if sent:
+                    email_sent_count += 1
                 time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
-        except Exception as e: app.logger.error(f"[自动化任务] 邮件提醒任务出错: {e}", exc_info=True)
+            
+            log_activity("系统", "automated_email_task", "成功", f"任务完成，成功发送了 {email_sent_count} 封到期提醒邮件。")
+        except Exception as e:
+            log_activity("系统", "automated_email_task", "失败", f"执行邮件提醒任务时发生意外错误: {e}")
+            app.logger.error(f"[自动化任务] 邮件提醒任务出错: {e}", exc_info=True)
 
 def automated_pre_delete_email_task():
     with app.app_context():
+        log_activity("系统", "automated_pre_delete_email_task", "信息", "开始执行删除前邮件提醒任务。")
+        email_sent_count = 0
         try:
-            # 计算删除阈值日期，并找到将在明天被删除的服务器
             delete_days = config_manager.get('AUTOMATION_DELETE_DAYS', 14)
             pre_delete_threshold_date = get_today() - timedelta(days=delete_days - 1)
             
             servers_to_notify = Server.query.filter(Server.expiration_date == pre_delete_threshold_date).all()
             if not servers_to_notify:
+                log_activity("系统", "automated_pre_delete_email_task", "信息", "任务完成，没有需要发送删除前提醒的服务器。")
                 return
 
             all_users_data = get_ptero_data("users")
             if not all_users_data:
+                log_activity("系统", "automated_pre_delete_email_task", "失败", "无法获取用户列表，任务中止。")
                 app.logger.error("[自动化任务] 无法获取用户列表，删除前邮件提醒任务中止。")
                 return
             
@@ -1219,10 +1412,8 @@ def automated_pre_delete_email_task():
                 body_raw = template.get('body', '')
 
                 context_vars = {
-                    '{{username}}': server.owner_username,
-                    '{{server_name}}': server.server_name,
-                    '{{server_id}}': str(server.ptero_server_id),
-                    '{{deletion_date}}': deletion_date_str,
+                    '{{username}}': server.owner_username, '{{server_name}}': server.server_name,
+                    '{{server_id}}': str(server.ptero_server_id), '{{deletion_date}}': deletion_date_str,
                     '{{panel_name}}': load_email_template().get('panel_name', 'Pterodactyl')
                 }
 
@@ -1230,16 +1421,17 @@ def automated_pre_delete_email_task():
                     subject_raw = subject_raw.replace(key, str(value))
                     body_raw = body_raw.replace(key, str(value))
 
-                send_email(
-                    recipient_email=recipient_email,
-                    subject=subject_raw,
-                    main_content_raw=body_raw,
-                    greeting=f"您好, {server.owner_username}!",
-                    action_text="登录面板处理",
-                    action_url=panel_url
+                sent, _ = send_email(
+                    recipient_email=recipient_email, subject=subject_raw, main_content_raw=body_raw,
+                    greeting=f"您好, {server.owner_username}!", action_text="登录面板处理", action_url=panel_url
                 )
+                if sent:
+                    email_sent_count += 1
                 time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+            
+            log_activity("系统", "automated_pre_delete_email_task", "成功", f"任务完成，成功发送了 {email_sent_count} 封删除前提醒邮件。")
         except Exception as e:
+            log_activity("系统", "automated_pre_delete_email_task", "失败", f"执行删除前邮件提醒任务时发生意外错误: {e}")
             app.logger.error(f"[自动化任务] 删除前邮件提醒任务出错: {e}", exc_info=True)
 
 def initialize_scheduler(app_instance):

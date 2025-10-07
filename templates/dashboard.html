@@ -18,6 +18,8 @@
             {% include 'email_template.html' %}
         {% elif request.endpoint == 'automation_page' %}
             {% include '_automation.html' %}
+        {% elif request.endpoint == 'activity_logs' %}
+            {% include '_activity_logs.html' %}
         {% elif request.endpoint == 'settings_page' %}
             {% include '_settings.html' %}
                 {% elif request.endpoint == 'edit_server' %}

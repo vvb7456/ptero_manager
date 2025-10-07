@@ -234,6 +234,7 @@
                     <a href="{{ url_for('users_list') }}" role="button" class="{{ 'contrast' if request.endpoint in ['users_list', 'create_user'] else 'secondary' }}">用户列表</a>
                     <a href="{{ url_for('email_template') }}" role="button" class="{{ 'contrast' if request.endpoint == 'email_template' else 'secondary' }}">邮件模板</a>
                     <a href="{{ url_for('automation_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'automation_page' else 'secondary' }}">自动化</a>
+                    <a href="{{ url_for('activity_logs') }}" role="button" class="{{ 'contrast' if request.endpoint == 'activity_logs' else 'secondary' }}">活动日志</a>
                     <a href="{{ url_for('settings_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'settings_page' else 'secondary' }}">系统设置</a>
                 </div>
             </nav>
@@ -256,6 +257,7 @@
         <a href="{{ url_for('users_list') }}" role="button" class="{{ 'contrast' if request.endpoint in ['users_list', 'create_user'] else 'secondary' }}">用户列表</a>
         <a href="{{ url_for('email_template') }}" role="button" class="{{ 'contrast' if request.endpoint == 'email_template' else 'secondary' }}">邮件模板</a>
         <a href="{{ url_for('automation_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'automation_page' else 'secondary' }}">自动化</a>
+        <a href="{{ url_for('activity_logs') }}" role="button" class="{{ 'contrast' if request.endpoint == 'activity_logs' else 'secondary' }}">活动日志</a>
         <a href="{{ url_for('settings_page') }}" role="button" class="{{ 'contrast' if request.endpoint == 'settings_page' else 'secondary' }}">系统设置</a>
         <a href="{{ url_for('logout') }}" role="button" class="secondary mobile-logout">退出登录</a>
     </nav>
