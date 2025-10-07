@@ -14,6 +14,13 @@ def when_ready(server):
         scheduler.start()
         server.log.info("APScheduler started in Gunicorn master process.")
 
+def post_fork(server, worker):
+    """
+    在 worker 进程被 fork 后调用。
+    暂停从 master 继承的 scheduler，防止 worker 执行重复任务。
+    """
+    scheduler.pause()
+
 # 绑定地址和端口
 bind = "0.0.0.0:5000"
 
