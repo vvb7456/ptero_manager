@@ -61,7 +61,10 @@
             <input type="checkbox" id="automation_email_enabled" name="AUTOMATION_EMAIL_ENABLED" role="switch" {% if settings.AUTOMATION_EMAIL_ENABLED %}checked{% endif %}>
             启用自动邮件提醒
         </label>
-        <small>每日在指定时间，为次日即将到期的服务器所有者发送提醒邮件。建议设在白天。</small>
+        <small>启用后，系统将在每日指定时间执行两项操作：<br>
+            1. 为 <strong>次日</strong> 即将到期的服务器所有者发送提醒邮件。<br>
+            2. 为即将在 <strong>次日</strong> 被永久删除的服务器所有者发送最终警告邮件。
+        </small>
         
         <div class="grid">
             <label for="automation_email_run_hour">

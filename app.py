@@ -418,6 +418,15 @@ def load_reminder_template():
 def save_reminder_template(data):
     with open(REMINDER_TEMPLATE_FILE, 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
 
+def load_pre_delete_template():
+    try:
+        with open('pre_delete_reminder_template.json', 'r', encoding='utf-8') as f: return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"subject": "【最终警告】您的服务器将于明天被删除", "body": "您好！您的服务器 {{server_name}} 将于 {{deletion_date}} 被永久删除，数据无法恢复。请立即续费以保留数据。"}
+
+def save_pre_delete_template(data):
+    with open('pre_delete_reminder_template.json', 'w', encoding='utf-8') as f: json.dump(data, f, ensure_ascii=False, indent=4)
+
 def load_create_user_template():
     try:
         with open(CREATE_USER_TEMPLATE_FILE, 'r', encoding='utf-8') as f: return json.load(f)
@@ -1079,11 +1088,14 @@ def email_template():
         elif form_type == 'reminder':
             reminder_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
             save_reminder_template(reminder_data); flash("到期提醒模板已保存。", "success")
+        elif form_type == 'pre_delete_reminder':
+            pre_delete_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
+            save_pre_delete_template(pre_delete_data); flash("删除前提醒模板已保存。", "success")
         elif form_type == 'create_user':
             create_user_data = {'subject': request.form.get('subject'), 'body': request.form.get('body')}
             save_create_user_template(create_user_data); flash("新用户通知模板已保存。", "success")
         return redirect(url_for('email_template'))
-    return render_template('dashboard.html', page_title="邮件模板管理", template_data=load_email_template(), reminder_template_data=load_reminder_template(), create_user_template_data=load_create_user_template())
+    return render_template('dashboard.html', page_title="邮件模板管理", template_data=load_email_template(), reminder_template_data=load_reminder_template(), pre_delete_template_data=load_pre_delete_template(), create_user_template_data=load_create_user_template())
 
 @app.route('/api/nodes/<int:node_id>/allocations')
 def api_get_node_allocations(node_id):
@@ -1178,6 +1190,58 @@ def automated_email_task():
                 time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
         except Exception as e: app.logger.error(f"[自动化任务] 邮件提醒任务出错: {e}", exc_info=True)
 
+def automated_pre_delete_email_task():
+    with app.app_context():
+        try:
+            # 计算删除阈值日期，并找到将在明天被删除的服务器
+            delete_days = config_manager.get('AUTOMATION_DELETE_DAYS', 14)
+            pre_delete_threshold_date = get_today() - timedelta(days=delete_days - 1)
+            
+            servers_to_notify = Server.query.filter(Server.expiration_date == pre_delete_threshold_date).all()
+            if not servers_to_notify:
+                return
+
+            all_users_data = get_ptero_data("users")
+            if not all_users_data:
+                app.logger.error("[自动化任务] 无法获取用户列表，删除前邮件提醒任务中止。")
+                return
+            
+            users_email_map = {u['attributes']['id']: u['attributes']['email'] for u in all_users_data if u.get('attributes')}
+            template = load_pre_delete_template()
+            panel_url = config_manager.get('PTERO_PANEL_URL')
+            deletion_date_str = (get_today() + timedelta(days=1)).strftime('%Y-%m-%d')
+
+            for server in servers_to_notify:
+                if not (recipient_email := users_email_map.get(server.owner_id)):
+                    continue
+
+                subject_raw = template.get('subject', '【最终警告】您的服务器即将被删除')
+                body_raw = template.get('body', '')
+
+                context_vars = {
+                    '{{username}}': server.owner_username,
+                    '{{server_name}}': server.server_name,
+                    '{{server_id}}': str(server.ptero_server_id),
+                    '{{deletion_date}}': deletion_date_str,
+                    '{{panel_name}}': load_email_template().get('panel_name', 'Pterodactyl')
+                }
+
+                for key, value in context_vars.items():
+                    subject_raw = subject_raw.replace(key, str(value))
+                    body_raw = body_raw.replace(key, str(value))
+
+                send_email(
+                    recipient_email=recipient_email,
+                    subject=subject_raw,
+                    main_content_raw=body_raw,
+                    greeting=f"您好, {server.owner_username}!",
+                    action_text="登录面板处理",
+                    action_url=panel_url
+                )
+                time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
+        except Exception as e:
+            app.logger.error(f"[自动化任务] 删除前邮件提醒任务出错: {e}", exc_info=True)
+
 def initialize_scheduler(app_instance):
     with app_instance.app_context():
         db.create_all()
@@ -1189,6 +1253,7 @@ def initialize_scheduler(app_instance):
             scheduler.add_job(id='auto_delete_task', func=automated_delete_task, trigger='cron', hour=cfg['AUTOMATION_RUN_HOUR'], minute=cfg['AUTOMATION_RUN_MINUTE'], replace_existing=True)
         if cfg.get('AUTOMATION_EMAIL_ENABLED'):
             scheduler.add_job(id='auto_email_task', func=automated_email_task, trigger='cron', hour=cfg['AUTOMATION_EMAIL_RUN_HOUR'], minute=cfg['AUTOMATION_EMAIL_RUN_MINUTE'], replace_existing=True)
+            scheduler.add_job(id='auto_pre_delete_email_task', func=automated_pre_delete_email_task, trigger='cron', hour=cfg['AUTOMATION_EMAIL_RUN_HOUR'], minute=cfg['AUTOMATION_EMAIL_RUN_MINUTE'], replace_existing=True)
 
 if __name__ == '__main__':
     os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance'), exist_ok=True)

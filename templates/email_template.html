@@ -61,3 +61,30 @@
 </article>
 
 <hr>
+
+<!-- 服务器删除前提醒模板 -->
+<article>
+    <hgroup>
+        <h2>服务器删除前提醒模板</h2>
+        <p>在此处编辑自动化任务发送的 **最终警告邮件** 的核心正文。系统将自动套用HTML模板。</p>
+    </hgroup>
+    <p>您可以使用以下变量：<br>
+        {% raw %}
+        <code>{{panel_name}}</code> - 面板名称。<br>
+        <code>{{username}}</code> - 用户的用户名。<br>
+        <code>{{server_name}}</code> - 即将被删除的服务器名称。<br>
+        <code>{{server_id}}</code> - 即将被删除的服务器 ID。<br>
+        <code>{{deletion_date}}</code> - 服务器预定的删除日期 (格式: YYYY-MM-DD)。<br>
+        {% endraw %}
+    </p>
+    <form method="post">
+        <input type="hidden" name="form_type" value="pre_delete_reminder">
+        <label for="pre_delete_reminder_subject">提醒邮件主题</label>
+        <input type="text" id="pre_delete_reminder_subject" name="subject" value="{{ pre_delete_template_data.subject }}" required>
+
+        <label for="pre_delete_reminder_body">提醒邮件正文 (支持换行)</label>
+        <textarea id="pre_delete_reminder_body" name="body" rows="10" required>{{ pre_delete_template_data.body }}</textarea>
+
+        <button type="submit">保存删除前提醒模板</button>
+    </form>
+</article>
