@@ -23,3 +23,4 @@ Thumbs.db
 
 # 应用实例和数据库文件
 instance/
+.continue/

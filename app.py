@@ -11,8 +11,6 @@ import time
 import pytz
 import logging
 from logging.config import dictConfig
-import random
-import string
 from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formataddr
@@ -26,7 +24,7 @@ from flask_apscheduler import APScheduler
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # --- 日志配置 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# 日志由 gunicorn_config.py 统一配置
 
 # --- 全局时区配置 ---
 LOCAL_TZ = pytz.timezone('Asia/Shanghai')
@@ -1326,126 +1324,112 @@ def automated_delete_task():
             log_activity("系统", "automated_delete_task", "失败", f"执行删除任务时发生意外错误: {e}")
             app.logger.error(f"[自动化任务] 删除任务出错: {e}", exc_info=True)
 
-def automated_email_task():
+def automated_reminder_task(reminder_type):
+    """
+    一个统一的自动化提醒任务，根据 reminder_type 发送不同类型的邮件。
+    'expiry': 发送到期前一天的提醒。
+    'pre_delete': 发送删除前一天的最终警告。
+    """
     with app.app_context():
-        log_activity("系统", "automated_email_task", "信息", "开始执行到期前邮件提醒任务。")
-        email_sent_count = 0
-        try:
-            tomorrow = get_today() + timedelta(days=1)
-            servers_to_notify = Server.query.filter(Server.expiration_date == tomorrow).all()
-            if not servers_to_notify:
-                log_activity("系统", "automated_email_task", "信息", "任务完成，没有需要发送到期提醒的服务器。")
-                return
-
-            owners_map = {}; [owners_map.setdefault(s.owner_id, []).append(s) for s in servers_to_notify]
-            all_users_data = get_ptero_data("users")
-            if not all_users_data:
-                log_activity("系统", "automated_email_task", "失败", "无法从API获取用户列表，任务中止。")
-                return
-
-            users_email_map = {u['attributes']['id']: u['attributes']['email'] for u in all_users_data if u.get('attributes')}
-            reminder_template = load_reminder_template()
-            panel_url = config_manager.get('PTERO_PANEL_URL')
-            
-            for owner_id, owner_servers in owners_map.items():
-                if not (recipient_email := users_email_map.get(owner_id)):
-                    continue
-                
-                server_list_str = "\n".join([f"- {s.server_name} (ID: {s.ptero_server_id})" for s in owner_servers])
-                subject_raw = reminder_template.get('subject', '【重要】您的服务器即将到期')
-                body_raw = reminder_template.get('body', '')
-
-                context_vars = {
-                    '{{username}}': owner_servers[0].owner_username, 
-                    '{{expiration_date}}': tomorrow.strftime('%Y-%m-%d'),
-                    '{{server_count}}': str(len(owner_servers)), 
-                    '{{server_list}}': server_list_str,
-                    '{{panel_name}}': load_email_template().get('panel_name', 'Pterodactyl')
-                }
-
-                for key, value in context_vars.items():
-                    subject_raw = subject_raw.replace(key, str(value))
-                    body_raw = body_raw.replace(key, str(value))
-                
-                sent, _ = send_email(
-                    recipient_email=recipient_email, subject=subject_raw, main_content_raw=body_raw,
-                    greeting=f"您好, {owner_servers[0].owner_username}!", action_text="登录面板处理", action_url=panel_url
-                )
-                if sent:
-                    email_sent_count += 1
-                time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
-            
-            log_activity("系统", "automated_email_task", "成功", f"任务完成，成功发送了 {email_sent_count} 封到期提醒邮件。")
-        except Exception as e:
-            log_activity("系统", "automated_email_task", "失败", f"执行邮件提醒任务时发生意外错误: {e}")
-            app.logger.error(f"[自动化任务] 邮件提醒任务出错: {e}", exc_info=True)
-
-def automated_pre_delete_email_task():
-    with app.app_context():
-        log_activity("系统", "automated_pre_delete_email_task", "信息", "开始执行删除前邮件提醒任务。")
-        email_sent_count = 0
-        try:
+        # 1. 根据类型设置不同的变量
+        if reminder_type == 'expiry':
+            task_name = "automated_expiry_reminder"
+            log_friendly_name = "到期提醒"
+            target_date = get_today() + timedelta(days=1)
+            template_loader = load_reminder_template
+        elif reminder_type == 'pre_delete':
+            task_name = "automated_pre_delete_reminder"
+            log_friendly_name = "删除前提醒"
             delete_days = config_manager.get('AUTOMATION_DELETE_DAYS', 14)
-            pre_delete_threshold_date = get_today() - timedelta(days=delete_days - 1)
-            
-            servers_to_notify = Server.query.filter(Server.expiration_date == pre_delete_threshold_date).all()
+            target_date = get_today() - timedelta(days=delete_days - 1)
+            template_loader = load_pre_delete_template
+        else:
+            app.logger.error(f"未知的提醒任务类型: {reminder_type}")
+            return
+
+        log_activity("系统", task_name, "信息", f"开始执行{log_friendly_name}任务。")
+        email_sent_count = 0
+        try:
+            # 2. 公共的服务器和用户数据获取
+            servers_to_notify = Server.query.filter(Server.expiration_date == target_date).all()
             if not servers_to_notify:
-                log_activity("系统", "automated_pre_delete_email_task", "信息", "任务完成，没有需要发送删除前提醒的服务器。")
+                log_activity("系统", task_name, "信息", f"任务完成，没有需要发送{log_friendly_name}的服务器。")
                 return
 
             all_users_data = get_ptero_data("users")
             if not all_users_data:
-                log_activity("系统", "automated_pre_delete_email_task", "失败", "无法获取用户列表，任务中止。")
-                app.logger.error("[自动化任务] 无法获取用户列表，删除前邮件提醒任务中止。")
+                log_activity("系统", task_name, "失败", "无法从API获取用户列表，任务中止。")
                 return
-            
+
             users_email_map = {u['attributes']['id']: u['attributes']['email'] for u in all_users_data if u.get('attributes')}
-            template = load_pre_delete_template()
+            template = template_loader()
             panel_url = config_manager.get('PTERO_PANEL_URL')
-            deletion_date_str = (get_today() + timedelta(days=1)).strftime('%Y-%m-%d')
+            panel_name = load_email_template().get('panel_name', 'Pterodactyl')
 
-            for server in servers_to_notify:
-                if not (recipient_email := users_email_map.get(server.owner_id)):
-                    continue
+            # 3. 根据类型执行不同的邮件发送逻辑
+            if reminder_type == 'expiry':
+                # 按所有者分组发送
+                owners_map = {}; [owners_map.setdefault(s.owner_id, []).append(s) for s in servers_to_notify]
+                for owner_id, owner_servers in owners_map.items():
+                    if not (recipient_email := users_email_map.get(owner_id)): continue
+                    
+                    server_list_str = "\n".join([f"- {s.server_name} (ID: {s.ptero_server_id})" for s in owner_servers])
+                    context = {
+                        '{{username}}': owner_servers[0].owner_username, '{{expiration_date}}': target_date.strftime('%Y-%m-%d'),
+                        '{{server_count}}': str(len(owner_servers)), '{{server_list}}': server_list_str, '{{panel_name}}': panel_name
+                    }
+                    subject = template.get('subject', '【重要】您的服务器即将到期')
+                    body = template.get('body', '')
+                    for key, value in context.items():
+                        subject = subject.replace(key, str(value))
+                        body = body.replace(key, str(value))
+                    
+                    sent, _ = send_email(recipient_email, subject, body, f"您好, {owner_servers[0].owner_username}!", "登录面板处理", panel_url)
+                    if sent: email_sent_count += 1
+                    time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
 
-                subject_raw = template.get('subject', '【最终警告】您的服务器即将被删除')
-                body_raw = template.get('body', '')
+            elif reminder_type == 'pre_delete':
+                # 逐个服务器发送
+                deletion_date_str = (get_today() + timedelta(days=1)).strftime('%Y-%m-%d')
+                for server in servers_to_notify:
+                    if not (recipient_email := users_email_map.get(server.owner_id)): continue
 
-                context_vars = {
-                    '{{username}}': server.owner_username, '{{server_name}}': server.server_name,
-                    '{{server_id}}': str(server.ptero_server_id), '{{deletion_date}}': deletion_date_str,
-                    '{{panel_name}}': load_email_template().get('panel_name', 'Pterodactyl')
-                }
+                    context = {
+                        '{{username}}': server.owner_username, '{{server_name}}': server.server_name,
+                        '{{server_id}}': str(server.ptero_server_id), '{{deletion_date}}': deletion_date_str, '{{panel_name}}': panel_name
+                    }
+                    subject = template.get('subject', '【最终警告】您的服务器即将被删除')
+                    body = template.get('body', '')
+                    for key, value in context.items():
+                        subject = subject.replace(key, str(value))
+                        body = body.replace(key, str(value))
 
-                for key, value in context_vars.items():
-                    subject_raw = subject_raw.replace(key, str(value))
-                    body_raw = body_raw.replace(key, str(value))
+                    sent, _ = send_email(recipient_email, subject, body, f"您好, {server.owner_username}!", "登录面板处理", panel_url)
+                    if sent: email_sent_count += 1
+                    time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
 
-                sent, _ = send_email(
-                    recipient_email=recipient_email, subject=subject_raw, main_content_raw=body_raw,
-                    greeting=f"您好, {server.owner_username}!", action_text="登录面板处理", action_url=panel_url
-                )
-                if sent:
-                    email_sent_count += 1
-                time.sleep(config_manager.get('EMAIL_SEND_DELAY', 2))
-            
-            log_activity("系统", "automated_pre_delete_email_task", "成功", f"任务完成，成功发送了 {email_sent_count} 封删除前提醒邮件。")
+            log_activity("系统", task_name, "成功", f"任务完成，成功发送了 {email_sent_count} 封{log_friendly_name}邮件。")
         except Exception as e:
-            log_activity("系统", "automated_pre_delete_email_task", "失败", f"执行删除前邮件提醒任务时发生意外错误: {e}")
-            app.logger.error(f"[自动化任务] 删除前邮件提醒任务出错: {e}", exc_info=True)
+            log_activity("系统", task_name, "失败", f"执行{log_friendly_name}任务时发生意外错误: {e}")
+            app.logger.error(f"[自动化任务] {log_friendly_name}任务出错: {e}", exc_info=True)
 
 def initialize_scheduler(app_instance):
     with app_instance.app_context():
         db.create_all()
         scheduler.init_app(app_instance)
         cfg = config_manager.config
+        run_hour = cfg['AUTOMATION_RUN_HOUR']
+        run_minute = cfg['AUTOMATION_RUN_MINUTE']
+        email_hour = cfg['AUTOMATION_EMAIL_RUN_HOUR']
+        email_minute = cfg['AUTOMATION_EMAIL_RUN_MINUTE']
+
         if cfg.get('AUTOMATION_SUSPEND_ENABLED'):
-            scheduler.add_job(id='auto_suspend_task', func=automated_suspend_task, trigger='cron', hour=cfg['AUTOMATION_RUN_HOUR'], minute=cfg['AUTOMATION_RUN_MINUTE'], replace_existing=True)
+            scheduler.add_job(id='auto_suspend_task', func=automated_suspend_task, trigger='cron', hour=run_hour, minute=run_minute, replace_existing=True)
         if cfg.get('AUTOMATION_DELETE_ENABLED'):
-            scheduler.add_job(id='auto_delete_task', func=automated_delete_task, trigger='cron', hour=cfg['AUTOMATION_RUN_HOUR'], minute=cfg['AUTOMATION_RUN_MINUTE'], replace_existing=True)
+            scheduler.add_job(id='auto_delete_task', func=automated_delete_task, trigger='cron', hour=run_hour, minute=run_minute, replace_existing=True)
         if cfg.get('AUTOMATION_EMAIL_ENABLED'):
-            scheduler.add_job(id='auto_email_task', func=automated_email_task, trigger='cron', hour=cfg['AUTOMATION_EMAIL_RUN_HOUR'], minute=cfg['AUTOMATION_EMAIL_RUN_MINUTE'], replace_existing=True)
-            scheduler.add_job(id='auto_pre_delete_email_task', func=automated_pre_delete_email_task, trigger='cron', hour=cfg['AUTOMATION_EMAIL_RUN_HOUR'], minute=cfg['AUTOMATION_EMAIL_RUN_MINUTE'], replace_existing=True)
+            scheduler.add_job(id='auto_expiry_reminder_task', func=automated_reminder_task, args=['expiry'], trigger='cron', hour=email_hour, minute=email_minute, replace_existing=True)
+            scheduler.add_job(id='auto_pre_delete_reminder_task', func=automated_reminder_task, args=['pre_delete'], trigger='cron', hour=email_hour, minute=email_minute, replace_existing=True)
 
 if __name__ == '__main__':
     os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'instance'), exist_ok=True)

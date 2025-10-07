@@ -27,19 +27,6 @@ LOG_DIR="$APP_DIR/logs"
 # Flask 应用入口，格式为 `模块名:Flask实例名`
 APP_MODULE="app:app"
 
-# --- Gunicorn 生产环境推荐配置 ---
-# 绑定的 IP 和端口。0.0.0.0 表示监听所有网络接口。
-BIND_ADDR="0.0.0.0:5000"
-
-# 工作进程数。推荐值为 (2 * CPU核心数) + 1。可以先从 3 开始。
-WORKERS=3
-
-# 【关键】Worker 类型。使用 gevent 来处理异步IO，防止超时。
-WORKER_CLASS="gevent"
-
-# 【关键】超时时间（秒）。延长以应对慢速API响应。
-TIMEOUT=120
-
 # Gunicorn 用户和组 (如果需要，可以取消注释并修改)
 # USER="your_user"
 # GROUP="your_group"
@@ -68,18 +55,8 @@ start() {
     # 切换到应用目录
     cd "$APP_DIR" || exit
 
-    # 启动 Gunicorn (已加入 --preload 参数)
-    gunicorn --config gunicorn_config.py ${APP_MODULE} \
-      --workers ${WORKERS} \
-      --worker-class ${WORKER_CLASS} \
-      --timeout ${TIMEOUT} \
-      --bind ${BIND_ADDR} \
-      --pid ${PID_FILE} \
-      --access-logfile "$LOG_DIR/access.log" \
-      --error-logfile "$LOG_DIR/error.log" \
-      --log-level "info" \
-      --preload \
-      --daemon
+    # 启动 Gunicorn，所有配置均由 gunicorn_config.py 管理
+    gunicorn --config gunicorn_config.py ${APP_MODULE}
 
     # --daemon 参数让 Gunicorn 在后台运行
 
