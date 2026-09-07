@@ -77,4 +77,3 @@ class ServerDefaultsResponse(BaseModel):
     databases: int
     backups: int
     allocations: int
-    server_name_prefix: str

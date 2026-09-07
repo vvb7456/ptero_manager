@@ -125,9 +125,7 @@
     "databases": "Databases",
     "backups": "Backups",
     "allocations": "Extra Ports",
-    "dockerImage": "Docker Image",
-    "serverNamePrefix": "Server Name Prefix",
-    "serverNamePrefix_placeholder": "e.g. mc, ark, game"
+    "dockerImage": "Docker Image"
   },
   "automation": {
     "title": "Automation",

@@ -125,9 +125,7 @@
     "databases": "数据库数量",
     "backups": "备份数量",
     "allocations": "额外端口",
-    "dockerImage": "Docker 镜像",
-    "serverNamePrefix": "服务器名称前缀",
-    "serverNamePrefix_placeholder": "如: mc、ark、game"
+    "dockerImage": "Docker 镜像"
   },
   "automation": {
     "title": "自动化",

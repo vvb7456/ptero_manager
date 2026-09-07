@@ -289,12 +289,6 @@ SETTINGS_SPECS: dict[str, SettingSpec] = _register({
         lambda: _env_int("DEFAULT_ALLOCATIONS", 1),
         _int_clamper(0, 1000, 1),
     ),
-    "SERVER_NAME_PREFIX": SettingSpec(
-        "SERVER_NAME_PREFIX",
-        "server_defaults",
-        lambda: _env_str("SERVER_NAME_PREFIX", ""),
-        _normalize_str,
-    ),
 })
 
 AUTOMATION_SPECS: dict[str, SettingSpec] = _register({

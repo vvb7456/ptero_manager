@@ -70,7 +70,7 @@ async def server_defaults(
         {
             key: default
             for key, default in defaults_for(SETTINGS_SPECS).items()
-            if key.startswith("DEFAULT_") or key in {"DOCKER_IMAGE", "SERVER_NAME_PREFIX"}
+            if key.startswith("DEFAULT_") or key in {"DOCKER_IMAGE"}
         },
     )
     return ServerDefaultsResponse(
@@ -84,7 +84,6 @@ async def server_defaults(
         databases=int(values["DEFAULT_DATABASES"]),
         backups=int(values["DEFAULT_BACKUPS"]),
         allocations=int(values["DEFAULT_ALLOCATIONS"]),
-        server_name_prefix=str(values["SERVER_NAME_PREFIX"]),
     )
 
 

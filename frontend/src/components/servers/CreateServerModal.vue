@@ -60,7 +60,17 @@ const eggList = ref<{ id: number; name: string; docker_image: string; startup: s
 const nodeList = ref<{ id: number; name: string }[]>([])
 const allocationList = ref<{ id: number; ip: string; port: number }[]>([])
 const eggVariables = ref<{ name: string; env_variable: string; default_value: string; description: string; rules: string }[]>([])
-const serverNamePrefix = ref('')
+
+// 6-char [A-Z0-9] suffix matching the tail style of billing order numbers
+// (auto-created servers use `username-<order_no[-6:]>`).
+function randomNameSuffix(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  const bytes = new Uint8Array(6)
+  crypto.getRandomValues(bytes)
+  let suffix = ''
+  for (const b of bytes) suffix += alphabet[b % alphabet.length]
+  return suffix
+}
 
 interface PlanOption {
   id: number
@@ -168,13 +178,13 @@ watch(() => createForm.value.node_id, async (nodeId) => {
   }
 })
 
-// Auto-fill server name when user changes
+// Auto-fill server name when user changes: `username-XXXXXX` (random suffix,
+// same style as self-service orders).
 watch(() => createForm.value.user_id, (userId) => {
   if (!userId) return
   const user = userList.value.find(u => u.id === userId)
   if (user) {
-    const prefix = serverNamePrefix.value
-    createForm.value.server_name = prefix ? `${prefix}-${user.username}` : user.username
+    createForm.value.server_name = `${user.username}-${randomNameSuffix()}`
   }
 })
 
@@ -293,7 +303,6 @@ watch(() => props.modelValue, async (open) => {
     createForm.value.backups = defaultsData.backups
     createForm.value.allocations = defaultsData.allocations
     createForm.value.docker_image = defaultsData.docker_image
-    serverNamePrefix.value = defaultsData.server_name_prefix || ''
     if (defaultsData.nest_id) createForm.value.nest_id = defaultsData.nest_id
     if (defaultsData.node_id) createForm.value.node_id = defaultsData.node_id
     if (defaultsData.egg_id) {

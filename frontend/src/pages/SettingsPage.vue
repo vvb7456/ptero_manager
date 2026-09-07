@@ -671,9 +671,6 @@ async function onTabChange(next: string) {
               <FormField :label="t('settings.defaults.node')" layout="horizontal">
                 <BaseSelect :modelValue="getNum('DEFAULT_NODE_ID')" :options="nodeOptions" :placeholder="t('settings.defaults.node')" @update:modelValue="setNum('DEFAULT_NODE_ID', $event)" />
               </FormField>
-              <FormField :label="t('settings.defaults.serverNamePrefix')" layout="horizontal">
-                <BaseInput :modelValue="getStr('SERVER_NAME_PREFIX')" :placeholder="t('settings.defaults.serverNamePrefix_placeholder')" @update:modelValue="setStr('SERVER_NAME_PREFIX', $event)" />
-              </FormField>
               <FormField :label="t('settings.defaults.dockerImage')" layout="horizontal">
                 <BaseInput :modelValue="getStr('DOCKER_IMAGE')" @update:modelValue="setStr('DOCKER_IMAGE', $event)" />
               </FormField>
